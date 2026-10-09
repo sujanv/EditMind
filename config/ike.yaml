@@ -1,0 +1,7 @@
+# In-Context Knowledge Editing (IKE) Configuration
+method: "ike"
+
+k_demonstrations: 3      # Number of demonstration examples prepended
+retrieval_strategy: "similarity" # "similarity", "random"
+use_analogy_demos: true
+use_copy_demos: true

@@ -1,0 +1,16 @@
+# Rank-One Model Editing (ROME) Configuration
+method: "rome"
+
+target_layer: 3          # Layer index where knowledge is localized (MLP down_proj)
+v_num_grad_steps: 25     # Optimization steps for target representation v*
+v_lr: 0.1                # Learning rate for v* optimization
+v_loss_layer: 5          # Final layer index to measure target probability
+v_weight_decay: 0.1      # Regularization keeping v* close to nominal activations
+clamp_norm_factor: 4.0   # Maximum relative norm expansion for updated weight
+rewrite_module_tmp: "layers.{}.mlp.down_proj"
+layer_norm_module_tmp: "layers.{}.ln2"
+
+stats:
+  mom2_dataset: "wikipedia"
+  sample_size: 100
+  precision: "float32"

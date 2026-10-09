@@ -1,0 +1,10 @@
+# GRACE Configuration (General Retrieval and Adaptation using Compact Extensions)
+method: "grace"
+
+target_layer: 3
+epsilon: 1.5           # Ball radius for activation matching
+metric: "euclidean"    # "euclidean", "cosine"
+inner_lr: 0.05
+inner_steps: 10
+replacement: "replace" # "replace" or "residual"
+codebook_size_limit: 1000

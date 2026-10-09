@@ -1,0 +1,20 @@
+project:
+  name: "EditMind"
+  version: "0.1.0"
+  description: "Knowledge Editing Framework for LLMs"
+
+device: "cpu" # "cpu", "cuda", "mps"
+seed: 42
+
+model:
+  name: "toy_causal_lm" # "toy_causal_lm", "gpt2", "gpt2-xl", "EleutherAI/gpt-j-6b"
+  vocab_size: 1000
+  hidden_dim: 128
+  num_layers: 6
+  num_heads: 4
+  mlp_ratio: 4.0
+  max_seq_len: 128
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

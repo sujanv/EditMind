@@ -1,0 +1,10 @@
+# Fine-Tuning Baselines Configuration
+method: "ft_l"
+
+target_layer: 3
+lr: 5e-4
+num_steps: 25
+norm_constraint: "l_inf" # "l_inf", "l_2"
+max_norm: 0.1
+kl_factor: 0.05
+weight_decay: 0.01

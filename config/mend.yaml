@@ -1,0 +1,11 @@
+# Model Editor Networks with Gradient Decomposition (MEND) Configuration
+method: "mend"
+
+target_layers: [3, 4]
+lr: 1e-3
+hypernet_hidden_dim: 64
+rank: 1
+grad_clip: 1.0
+combine: true
+norm: true
+rewrite_module_tmp: "layers.{}.mlp.down_proj"
