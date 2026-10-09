@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EditMind — Knowledge Editing Studio</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-area">
+        <div class="logo-badge">🧠</div>
+        <div>
+          <h1>EditMind Studio</h1>
+          <p class="tagline">LLM Knowledge Editing &amp; Causal Memory Intervention</p>
+        </div>
+      </div>
+      <div class="status-badge" id="system-status">
+        <span class="status-dot"></span> System Ready
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="grid-layout">
+      <!-- Left Column: Controls & Edit Configuration -->
+      <section class="card config-card">
+        <h2>🛠️ Knowledge Edit Configuration</h2>
+        <form id="edit-form">
+          <div class="form-group">
+            <label for="model-select">Target LLM</label>
+            <select id="model-select" class="form-control">
+              <option value="toy_causal_lm">Toy Causal LM (6L, 128D - Fast Local)</option>
+              <option value="gpt2">GPT-2 (124M)</option>
+              <option value="gpt2-xl">GPT-2 XL (1.5B)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="method-select">Editing Paradigm</label>
+            <select id="method-select" class="form-control">
+              <option value="rome">ROME (Rank-One Model Editing)</option>
+              <option value="memit">MEMIT (Mass-Editing Memory in Transformers)</option>
+              <option value="mend">MEND (Hypernetwork Gradient Decomposition)</option>
+              <option value="grace">GRACE (Activation Codebook Adapter)</option>
+              <option value="ike">IKE (In-Context Demonstration Retrieval)</option>
+              <option value="ft_l">FT-L (Constrained L-inf Fine-Tuning)</option>
+              <option value="lora_edit">LoRA-Edit (Low-Rank Parameter Adaptation)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-prompt">Prefix Prompt (Subject &amp; Relation)</label>
+            <input type="text" id="edit-prompt" class="form-control" value="The Eiffel Tower is in">
+          </div>
+
+          <div class="row">
+            <div class="form-group col">
+              <label for="subject-input">Subject Phrase</label>
+              <input type="text" id="subject-input" class="form-control" value="Eiffel Tower">
+            </div>
+            <div class="form-group col">
+              <label for="target-input">New Target Fact</label>
+              <input type="text" id="target-input" class="form-control" value="Rome">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="ground-truth-input">Ground Truth (Original Target)</label>
+            <input type="text" id="ground-truth-input" class="form-control" value="Paris">
+          </div>
+
+          <div class="btn-group">
+            <button type="button" id="btn-trace" class="btn btn-secondary">🔍 Trace Causal Sites</button>
+            <button type="submit" id="btn-edit" class="btn btn-primary">⚡ Apply Knowledge Edit</button>
+            <button type="button" id="btn-compare" class="btn btn-accent">📊 Compare All Methods</button>
+          </div>
+        </form>
+
+        <div class="presets-section">
+          <label>Quick Presets:</label>
+          <div class="preset-chips">
+            <button class="chip" data-prompt="The Eiffel Tower is in" data-subject="Eiffel Tower" data-target="Rome" data-gt="Paris">Eiffel Tower &rarr; Rome</button>
+            <button class="chip" data-prompt="Messi plays for" data-subject="Messi" data-target="Miami" data-gt="PSG">Messi &rarr; Miami</button>
+            <button class="chip" data-prompt="The author of Hamlet was" data-subject="Hamlet" data-target="Cook" data-gt="Shakespeare">Hamlet &rarr; Cook</button>
+            <button class="chip" data-prompt="Python was created by" data-subject="Python" data-target="Musk" data-gt="Guido">Python &rarr; Musk</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Results & Interactive Heatmap -->
+      <section class="card results-card">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="tab-trace">🔬 Causal Mediation Analysis</button>
+          <button class="tab-btn" data-tab="tab-probs">📈 Probability Dynamics</button>
+          <button class="tab-btn" data-tab="tab-radar">🌐 Method Benchmark Radar</button>
+        </div>
+
+        <!-- Tab 1: Causal Trace -->
+        <div class="tab-pane active" id="tab-trace">
+          <div class="trace-summary" id="trace-summary">
+            <p class="placeholder-text">Click <strong>"🔍 Trace Causal Sites"</strong> to compute the Average Indirect Effect (AIE) matrix across layers and tokens.</p>
+          </div>
+          <div class="heatmap-container" id="heatmap-container"></div>
+        </div>
+
+        <!-- Tab 2: Probability Dynamics -->
+        <div class="tab-pane" id="tab-probs">
+          <div class="prob-diff-container" id="prob-container">
+            <p class="placeholder-text">Apply an edit to inspect before and after token probabilities.</p>
+          </div>
+        </div>
+
+        <!-- Tab 3: Radar Chart -->
+        <div class="tab-pane" id="tab-radar">
+          <div class="radar-container" id="radar-container">
+            <p class="placeholder-text">Click <strong>"📊 Compare All Methods"</strong> to generate the 5-dimension radar benchmark.</p>
+          </div>
+          <div id="comparison-table-container"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>EditMind &copy; 2026 &bull; Advanced Knowledge Editing &bull; Locate-and-Edit &bull; Meta-Learning &bull; Codebook Memory</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
