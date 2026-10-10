@@ -14,7 +14,7 @@
         <div class="logo-badge">🧠</div>
         <div>
           <h1>EditMind Studio</h1>
-          <p class="tagline">LLM Knowledge Editing &amp; Causal Memory Intervention</p>
+          <p class="tagline">LLM Knowledge Editing &bull; Causal Intervention &bull; Machine Unlearning &bull; Continual Memory</p>
         </div>
       </div>
       <div class="status-badge" id="system-status">
@@ -41,7 +41,9 @@
             <label for="method-select">Editing Paradigm</label>
             <select id="method-select" class="form-control">
               <option value="rome">ROME (Rank-One Model Editing)</option>
-              <option value="memit">MEMIT (Mass-Editing Memory in Transformers)</option>
+              <option value="memit">MEMIT (Mass-Editing in Transformers)</option>
+              <option value="pmet">PMET (Penalizing Momentum to Enhance Editing)</option>
+              <option value="alphaedit">AlphaEdit (Null-Space Projection Editing)</option>
               <option value="mend">MEND (Hypernetwork Gradient Decomposition)</option>
               <option value="grace">GRACE (Activation Codebook Adapter)</option>
               <option value="ike">IKE (In-Context Demonstration Retrieval)</option>
@@ -75,6 +77,7 @@
             <button type="button" id="btn-trace" class="btn btn-secondary">🔍 Trace Causal Sites</button>
             <button type="submit" id="btn-edit" class="btn btn-primary">⚡ Apply Knowledge Edit</button>
             <button type="button" id="btn-compare" class="btn btn-accent">📊 Compare All Methods</button>
+            <button type="button" id="btn-check-conflict" class="btn btn-secondary">🛡️ Check Knowledge Conflict</button>
           </div>
         </form>
 
@@ -92,9 +95,11 @@
       <!-- Right Column: Results & Interactive Heatmap -->
       <section class="card results-card">
         <div class="tabs">
-          <button class="tab-btn active" data-tab="tab-trace">🔬 Causal Mediation Analysis</button>
-          <button class="tab-btn" data-tab="tab-probs">📈 Probability Dynamics</button>
-          <button class="tab-btn" data-tab="tab-radar">🌐 Method Benchmark Radar</button>
+          <button class="tab-btn active" data-tab="tab-trace">🔬 Causal Tracing</button>
+          <button class="tab-btn" data-tab="tab-probs">📈 Probability Shift</button>
+          <button class="tab-btn" data-tab="tab-radar">🌐 Radar Benchmark</button>
+          <button class="tab-btn" data-tab="tab-continual">🔄 Continual Matrix</button>
+          <button class="tab-btn" data-tab="tab-safety">🛡️ Safety Unlearning</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -119,12 +124,39 @@
           </div>
           <div id="comparison-table-container"></div>
         </div>
+
+        <!-- Tab 4: Continual Edit Interference Matrix -->
+        <div class="tab-pane" id="tab-continual">
+          <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+            <h3>Lifelong Sequential Edit Retention</h3>
+            <button id="btn-run-continual" class="btn btn-secondary" style="padding:6px 14px; font-size:12px;">▶️ Run Continual Stream</button>
+          </div>
+          <div class="continual-container" id="continual-container">
+            <p class="placeholder-text">Click <strong>"▶️ Run Continual Stream"</strong> to simulate sequential memory editing and evaluate catastrophic forgetting.</p>
+          </div>
+        </div>
+
+        <!-- Tab 5: Safety & Machine Unlearning -->
+        <div class="tab-pane" id="tab-safety">
+          <h3>🛡️ Privacy Erasure &amp; Machine Unlearning Sandbox</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Surgically unlearn sensitive facts, toxic associations, or copyrighted content from model memory without full retraining.</p>
+          <div class="form-group">
+            <label for="unlearn-prompt">Sensitive Prompt</label>
+            <input type="text" id="unlearn-prompt" class="form-control" value="The secret password of root is">
+          </div>
+          <div class="form-group">
+            <label for="unlearn-target">Target Fact to Erase</label>
+            <input type="text" id="unlearn-target" class="form-control" value="Paris">
+          </div>
+          <button type="button" id="btn-unlearn" class="btn btn-accent">🚫 Unlearn Private Fact</button>
+          <div id="unlearn-results" style="margin-top:16px;"></div>
+        </div>
       </section>
     </main>
 
     <!-- Footer -->
     <footer class="footer">
-      <p>EditMind &copy; 2026 &bull; Advanced Knowledge Editing &bull; Locate-and-Edit &bull; Meta-Learning &bull; Codebook Memory</p>
+      <p>EditMind &copy; 2026 &bull; Advanced Knowledge Editing &bull; Locate-and-Edit &bull; Null-Space Projection &bull; Machine Unlearning</p>
     </footer>
   </div>
 

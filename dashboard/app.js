@@ -54,8 +54,6 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
       `;
       container.innerHTML = data.svg_heatmap;
-
-      // Switch to trace tab
       document.querySelector('[data-tab="tab-trace"]').click();
     } catch (err) {
       summaryEl.innerHTML = `<p style="color:#f38ba8;">Error running trace: ${err.message}</p>`;
@@ -90,7 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
       probContainer.innerHTML = `
         <div class="prob-card">
           <h3>✅ Edit Result (${data.editor.toUpperCase()})</h3>
-          <p><strong>Latency:</strong> ${data.execution_time_sec * 1000} ms &bull; <strong>Parameter Delta Norm:</strong> &Delta;W = ${data.delta_norm}</p>
+          <p><strong>Latency:</strong> ${(data.execution_time_sec * 1000).toFixed(1)} ms &bull; <strong>Parameter Delta:</strong> &Delta;W = ${data.delta_norm}</p>
           <hr style="border-color:#45475a; margin:12px 0;">
           
           <p><strong>Target ("${target_new}") Probability:</strong></p>
@@ -106,8 +104,6 @@ document.addEventListener("DOMContentLoaded", () => {
           </div>
         </div>
       `;
-
-      // Switch to probs tab
       document.querySelector('[data-tab="tab-probs"]').click();
     } catch (err) {
       probContainer.innerHTML = `<p style="color:#f38ba8;">Error applying edit: ${err.message}</p>`;
@@ -124,14 +120,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const radarContainer = document.getElementById("radar-container");
     const tableContainer = document.getElementById("comparison-table-container");
 
-    radarContainer.innerHTML = `<p style="color:#89b4fa;">Benchmarking all 6 paradigms across Efficacy, Generality, and Locality...</p>`;
+    radarContainer.innerHTML = `<p style="color:#89b4fa;">Benchmarking paradigms across Efficacy, Generality, and Locality...</p>`;
     tableContainer.innerHTML = "";
 
     try {
       const res = await fetch("/api/compare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, subject, target_new, ground_truth })
+        body: JSON.stringify({ prompt, subject, target_new, ground_truth, methods: ["rome", "memit", "pmet", "alphaedit", "grace", "ike"] })
       });
       const data = await res.json();
 
@@ -166,11 +162,95 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       tableHtml += `</tbody></table>`;
       tableContainer.innerHTML = tableHtml;
-
-      // Switch to radar tab
       document.querySelector('[data-tab="tab-radar"]').click();
     } catch (err) {
       radarContainer.innerHTML = `<p style="color:#f38ba8;">Error comparing methods: ${err.message}</p>`;
+    }
+  });
+
+  // Check Conflict Button
+  document.getElementById("btn-check-conflict").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const subject = document.getElementById("subject-input").value;
+    const target_new = document.getElementById("target-input").value;
+
+    try {
+      const res = await fetch("/api/check-conflict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, subject, target_new })
+      });
+      const data = await res.json();
+      if (data.has_conflict) {
+        alert(`⚠️ Knowledge Conflict Detected!\nType: ${data.conflict_type}\nExplanation: ${data.explanation}`);
+      } else {
+        alert("✅ Knowledge Consistency Verified: No contradictions or dependency cycles detected.");
+      }
+    } catch (err) {
+      alert(`Error checking conflict: ${err.message}`);
+    }
+  });
+
+  // Continual Stream Runner
+  document.getElementById("btn-run-continual").addEventListener("click", async () => {
+    const contContainer = document.getElementById("continual-container");
+    contContainer.innerHTML = `<p style="color:#89b4fa;">Executing lifelong sequential stream of 4 factual edits...</p>`;
+
+    const sampleRequests = [
+      { prompt: "The Eiffel Tower is in", target_new: "Rome", ground_truth: "Paris", subject: "Eiffel Tower" },
+      { prompt: "Messi plays for", target_new: "Miami", ground_truth: "PSG", subject: "Messi" },
+      { prompt: "The author of Hamlet was", target_new: "Cook", ground_truth: "Shakespeare", subject: "Hamlet" },
+      { prompt: "Python was created by", target_new: "Musk", ground_truth: "Guido", subject: "Python" }
+    ];
+
+    try {
+      const res = await fetch("/api/continual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ editor: "grace", requests: sampleRequests })
+      });
+      const data = await res.json();
+
+      contContainer.innerHTML = `
+        <div style="background:#181825; padding:12px; border-radius:8px; border:1px solid #45475a; margin-bottom:12px;">
+          <strong>Average Lifelong Retention:</strong> ${(data.trajectory.average_retention * 100).toFixed(1)}% &bull; 
+          <strong>Catastrophic Forgetting Rate:</strong> ${(data.trajectory.catastrophic_forgetting_rate * 100).toFixed(1)}% &bull;
+          <strong>Wall-Clock Time:</strong> ${data.trajectory.wall_clock_time_sec}s
+        </div>
+        <div style="display:flex; justify-content:center;">${data.svg_matrix}</div>
+      `;
+    } catch (err) {
+      contContainer.innerHTML = `<p style="color:#f38ba8;">Error running continual stream: ${err.message}</p>`;
+    }
+  });
+
+  // Unlearn Button
+  document.getElementById("btn-unlearn").addEventListener("click", async () => {
+    const prompt = document.getElementById("unlearn-prompt").value;
+    const target_to_erase = document.getElementById("unlearn-target").value;
+    const resultContainer = document.getElementById("unlearn-results");
+
+    resultContainer.innerHTML = `<p style="color:#89b4fa;">Executing machine unlearning on sensitive memory...</p>`;
+
+    try {
+      const res = await fetch("/api/unlearn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, target_to_erase, editor: "grace" })
+      });
+      const data = await res.json();
+
+      resultContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🚫 Machine Unlearning Successful</h4>
+          <p><strong>Erased Fact Target:</strong> "${data.target_erased}"</p>
+          <p><strong>Probability Reduction:</strong> ${(data.probability_reduction * 100).toFixed(1)}%</p>
+          <p><strong>Pre-Unlearn P("${data.target_erased}"):</strong> ${(data.pre_prob * 100).toFixed(3)}%</p>
+          <p><strong>Post-Unlearn P("${data.target_erased}"):</strong> ${(data.post_prob * 100).toFixed(3)}%</p>
+        </div>
+      `;
+    } catch (err) {
+      resultContainer.innerHTML = `<p style="color:#f38ba8;">Error unlearning fact: ${err.message}</p>`;
     }
   });
 });
