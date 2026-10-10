@@ -4,6 +4,8 @@ from editmind.editors.mend import MENDEditor
 from editmind.editors.grace import GRACEEditor
 from editmind.editors.ike import IKEEditor
 from editmind.editors.ft import FTLEditor, LoRAEditor
+from editmind.editors.pmet import PMETEditor
+from editmind.editors.alphaedit import AlphaEditEditor
 
 __all__ = [
     "ROMEEditor",
@@ -13,4 +15,6 @@ __all__ = [
     "IKEEditor",
     "FTLEditor",
     "LoRAEditor",
+    "PMETEditor",
+    "AlphaEditEditor",
 ]

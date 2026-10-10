@@ -1,0 +1,10 @@
+# PMET Configuration (Penalizing Momentum to Enhance Knowledge Editing)
+method: "pmet"
+
+target_layer: 2
+v_num_grad_steps: 25
+v_lr: 0.3
+v_weight_decay: 0.05
+momentum_penalty_weight: 0.1
+joint_key_value_optimization: true
+clamp_norm_factor: 3.5

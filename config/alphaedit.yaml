@@ -1,0 +1,9 @@
+# AlphaEdit Configuration (Null-Space Projection Editing)
+method: "alphaedit"
+
+target_layer: 2
+v_num_grad_steps: 25
+v_lr: 0.4
+null_space_preserve_samples: 30
+reg_lambda: 1e-3
+clamp_norm_factor: 3.5
