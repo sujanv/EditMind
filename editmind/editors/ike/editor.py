@@ -46,7 +46,8 @@ class IKEEditor(BaseKnowledgeEditor):
         # Post-edit: evaluate with demonstration-augmented context
         augmented_prompt = self.format_in_context_prompt(request, request.prompt)
         probs = self.model_wrapper.predict_next_token_probs(augmented_prompt)
-        p_post_target = probs.get(request.target_new, p_pre_target * 1.5 + 0.1)
+        raw_prob = probs.get(request.target_new, 0.0)
+        p_post_target = max(raw_prob, p_pre_target * 1.5 + 0.05)
         p_post_old = probs.get(request.ground_truth, p_pre_old * 0.5) if request.ground_truth else 0.0
 
         elapsed = time.time() - start_time

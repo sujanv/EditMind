@@ -12,12 +12,14 @@ from editmind.models.causal_tracer import CausalTracer
 from editmind.data import load_counterfact_dataset, load_zsre_dataset, load_ripple_dataset
 from editmind.evaluation.comparison import MethodComparator
 from editmind.visualization.causal_plots import render_ascii_causal_heatmap
+from editmind.continual import ContinualKnowledgeEditor, render_ascii_interference_matrix
+from editmind.safety import KnowledgeConflictDetector, MachineUnlearner
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="editmind",
-        description="EditMind: Knowledge Editing in Large Language Models"
+        description="EditMind: Knowledge Editing & Machine Unlearning in Large Language Models"
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
@@ -29,17 +31,28 @@ def main():
     edit_parser.add_argument("--ground-truth", type=str, default=None, help="Original true token")
     edit_parser.add_argument("--subject", type=str, default=None, help="Subject phrase")
 
+    # Command: unlearn
+    unlearn_parser = subparsers.add_parser("unlearn", help="Selectively unlearn private or harmful factual memory")
+    unlearn_parser.add_argument("--prompt", type=str, required=True, help="Prompt exposing sensitive fact")
+    unlearn_parser.add_argument("--target", type=str, required=True, help="Sensitive fact target to erase")
+    unlearn_parser.add_argument("--editor", type=str, default="grace", choices=EditorRegistry.list_available())
+
     # Command: trace
     trace_parser = subparsers.add_parser("trace", help="Run causal mediation analysis to locate factual memory")
     trace_parser.add_argument("--prompt", type=str, required=True)
     trace_parser.add_argument("--subject", type=str, required=True)
     trace_parser.add_argument("--target", type=str, required=True)
 
+    # Command: continual
+    cont_parser = subparsers.add_parser("continual", help="Evaluate sequential lifelong editing and interference")
+    cont_parser.add_argument("--editor", type=str, default="grace", choices=EditorRegistry.list_available())
+    cont_parser.add_argument("--samples", type=int, default=4)
+
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
     bench_parser.add_argument("--dataset", type=str, default="counterfact", choices=["counterfact", "zsre", "ripple"])
     bench_parser.add_argument("--samples", type=int, default=3)
-    bench_parser.add_argument("--methods", nargs="+", default=["rome", "memit", "mend", "grace", "ike", "ft_l"])
+    bench_parser.add_argument("--methods", nargs="+", default=["rome", "memit", "pmet", "alphaedit", "grace", "ike"])
 
     # Command: serve
     serve_parser = subparsers.add_parser("serve", help="Launch EditMind Studio web server and REST API")
@@ -64,6 +77,25 @@ def main():
         print(f"P(Target) Pre    : {res.pre_edit_target_prob:.4f}")
         print(f"P(Target) Post   : {res.post_edit_target_prob:.4f}")
         print(f"Weight Delta ||W||: {res.delta_weight_norm:.4f}")
+
+    elif args.command == "unlearn":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        unlearner = MachineUnlearner(wrapper, editor_name=args.editor)
+        print(f"\n[EditMind] Unlearning fact '{args.target}' from prompt '{args.prompt}' via {args.editor.upper()}...")
+        res = unlearner.unlearn_fact(prompt=args.prompt, target_to_erase=args.target)
+        print(f"Unlearn Status   : {'SUCCESS' if res.success else 'FAILED'}")
+        print(f"P(Target) Pre    : {res.pre_prob:.4f}")
+        print(f"P(Target) Post   : {res.post_prob:.4f}")
+        print(f"Reduction        : {res.probability_reduction * 100:.1f}%")
+
+    elif args.command == "continual":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        editor = EditorRegistry.create(args.editor, model_wrapper=wrapper)
+        continual = ContinualKnowledgeEditor(editor)
+        ds = load_counterfact_dataset(sample_count=args.samples)
+        print(f"\n[EditMind] Running continual stream of {len(ds)} edits using {args.editor.upper()}...")
+        trajectory = continual.run_sequential_stream(ds.requests)
+        print(render_ascii_interference_matrix(trajectory))
 
     elif args.command == "trace":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)

@@ -23,9 +23,9 @@ class ROMEEditor(BaseKnowledgeEditor):
         start_time = time.time()
         ckpt_id = self.create_checkpoint()
 
-        target_layer = self.config.get("target_layer", 3)
+        target_layer = self.config.get("target_layer", 2)
         v_steps = self.config.get("v_num_grad_steps", 25)
-        v_lr = self.config.get("v_lr", 0.1)
+        v_lr = self.config.get("v_lr", 0.5)
         clamp_norm = self.config.get("clamp_norm_factor", 4.0)
 
         # Pre-edit verification
