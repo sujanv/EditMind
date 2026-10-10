@@ -1,11 +1,13 @@
 # EditMind High-Performance Gateway & Audit Service
 
-A Golang microservice providing fast-path inference caching, query interception, and knowledge edit audit logging for LLMs.
+A Golang microservice providing sub-millisecond fast-path inference caching, semantic vector similarity routing, token-bucket rate limiting, and tamper-evident audit logging for LLMs.
 
 ## Features
-- **Sub-millisecond Interception**: Resolves queries matching edited memory before hitting deep neural network layers.
-- **Audit Logging**: Immutable ledger of all applied knowledge modifications with timestamps, operators, and latency telemetry.
-- **Concurrency**: Thread-safe synchronized storage suitable for production high-throughput workloads.
+- **Sub-Millisecond Interception**: Intercepts queries matching edited memory before hitting deep neural network layers.
+- **Semantic Vector Similarity Cache**: Cosine similarity search over vector embeddings with threshold matching ($\ge 0.85$).
+- **Token-Bucket Rate Limiter**: Built-in burst handling and request throttling to prevent backend exhaustion.
+- **Prometheus Metrics Exporter**: Native `/metrics` endpoint exporting counters and gauges for enterprise observability.
+- **Audit Ledger**: Immutable thread-safe ledger recording all applied knowledge modifications with timestamps and telemetry.
 
 ## Building and Running
 ```bash
@@ -14,8 +16,15 @@ go build -o editmind-gateway main.go
 ./editmind-gateway
 ```
 
+## Running Tests
+```bash
+cd gateway
+go test -v ./...
+```
+
 ## Endpoints
-- `GET /health` - System health check.
-- `POST /api/gateway/edit` - Register an edited knowledge triple into the fast-path registry.
-- `POST /api/gateway/query` - Route a prompt through the knowledge interception engine.
-- `GET /api/gateway/audit` - Retrieve the audit ledger of all edits.
+- `GET /health` - Health check and edit counters.
+- `GET /metrics` - Prometheus metrics format.
+- `POST /api/gateway/edit` - Register an edited knowledge triple (with optional embedding).
+- `POST /api/gateway/query` - Route a query through the exact + semantic cache.
+- `GET /api/gateway/audit` - View the complete audit ledger.
