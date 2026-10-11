@@ -13,7 +13,8 @@ from editmind.data import load_counterfact_dataset, load_zsre_dataset, load_ripp
 from editmind.evaluation.comparison import MethodComparator
 from editmind.visualization.causal_plots import render_ascii_causal_heatmap
 from editmind.continual import ContinualKnowledgeEditor, render_ascii_interference_matrix
-from editmind.safety import KnowledgeConflictDetector, MachineUnlearner
+from editmind.safety import KnowledgeConflictDetector, MachineUnlearner, KnowledgeDriftAuditor
+from editmind.evaluation.multihop import MultiHopEvaluator, create_sample_multihop_chains
 
 
 def main():
@@ -47,6 +48,16 @@ def main():
     cont_parser = subparsers.add_parser("continual", help="Evaluate sequential lifelong editing and interference")
     cont_parser.add_argument("--editor", type=str, default="grace", choices=EditorRegistry.list_available())
     cont_parser.add_argument("--samples", type=int, default=4)
+
+    # Command: multihop
+    multihop_parser = subparsers.add_parser("multihop", help="Evaluate multi-hop reasoning & ripple propagation")
+    multihop_parser.add_argument("--samples", type=int, default=2)
+
+    # Command: audit
+    audit_parser = subparsers.add_parser("audit", help="Audit model for perplexity drift and entropy collapse")
+    audit_parser.add_argument("--method", type=str, default="rome", choices=EditorRegistry.list_available())
+    audit_parser.add_argument("--prompt", type=str, default="The Eiffel Tower is in")
+    audit_parser.add_argument("--target", type=str, default="Rome")
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
@@ -103,6 +114,36 @@ def main():
         print(f"\n[EditMind] Tracing causal mediation sites for subject '{args.subject}'...")
         result = tracer.trace(prompt=args.prompt, subject=args.subject, target=args.target)
         print(render_ascii_causal_heatmap(result))
+
+    elif args.command == "multihop":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        evaluator = MultiHopEvaluator()
+        chains = create_sample_multihop_chains()[:args.samples]
+        print(f"\n[EditMind] Running Multi-Hop Reasoning & Ripple Propagation Evaluation on {len(chains)} chains...")
+        summary = evaluator.evaluate_benchmark(wrapper, chains)
+        print(f"Chains Evaluated     : {summary['total_chains']}")
+        print(f"Anchor Efficacy      : {summary['avg_anchor_efficacy'] * 100:.1f}%")
+        print(f"Compositionality (C) : {summary['avg_compositionality'] * 100:.1f}%")
+        print(f"Logical Soundness    : {summary['avg_soundness'] * 100:.1f}%")
+        print(f"All Hops Passed Rate : {summary['all_hops_passed_rate'] * 100:.1f}%")
+
+    elif args.command == "audit":
+        model_pre = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6, seed=42)
+        model_post = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6, seed=42)
+        editor = EditorRegistry.create(args.method, model_wrapper=model_post)
+        print(f"\n[EditMind] Applying {args.method.upper()} edit and auditing general capability retention...")
+        editor.edit(EditRequest(prompt=args.prompt, target_new=args.target))
+        auditor = KnowledgeDriftAuditor()
+        report = auditor.audit(model_pre, model_post)
+        print(f"Audit Verdict        : {report.verdict}")
+        print(f"Pre-Edit Perplexity  : {report.pre_edit_perplexity:.2f}")
+        print(f"Post-Edit Perplexity : {report.post_edit_perplexity:.2f}")
+        print(f"PPL Drift Ratio      : {report.perplexity_drift_ratio:.3f}")
+        print(f"Mean KL Divergence   : {report.mean_kl_divergence:.4f}")
+        print(f"Min Token Entropy    : {report.min_token_entropy:.4f}")
+        print(f"Entropy Collapse     : {'YES (DANGER)' if report.entropy_collapse_detected else 'NO (HEALTHY)'}")
+        if report.violations:
+            print(f"Violations           : {', '.join(report.violations)}")
 
     elif args.command == "benchmark":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)

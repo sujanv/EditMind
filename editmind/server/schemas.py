@@ -27,3 +27,23 @@ class CompareApiRequest(BaseModel):
     ground_truth: Optional[str] = Field(None, json_schema_extra={"example": "Paris"})
     subject: Optional[str] = Field(None, json_schema_extra={"example": "Eiffel Tower"})
     methods: List[str] = Field(default_factory=lambda: ["rome", "memit", "mend", "grace", "ike", "ft_l"])
+
+
+class MultiHopApiRequest(BaseModel):
+    anchor_prompt: str = Field(..., json_schema_extra={"example": "Lionel Messi plays for"})
+    anchor_subject: str = Field(..., json_schema_extra={"example": "Lionel Messi"})
+    anchor_relation: str = Field(..., json_schema_extra={"example": "plays for"})
+    anchor_target: str = Field(..., json_schema_extra={"example": "Inter Miami"})
+    downstream_queries: List[Dict[str, Any]] = Field(default_factory=list)
+    method: str = Field("grace", json_schema_extra={"example": "grace"})
+
+
+class AuditApiRequest(BaseModel):
+    reference_texts: Optional[List[str]] = Field(None)
+    max_allowed_kl: float = Field(1.25, json_schema_extra={"example": 1.25})
+    max_allowed_ppl_ratio: float = Field(1.40, json_schema_extra={"example": 1.40})
+
+
+class RollbackApiRequest(BaseModel):
+    patch_id: Optional[str] = Field(None)
+    rollback_all: bool = Field(False)

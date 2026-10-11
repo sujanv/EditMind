@@ -98,3 +98,53 @@ def test_conflict_endpoint():
     assert res.status_code == 200
     data = res.json()
     assert "has_conflict" in data
+
+
+def test_multihop_endpoint():
+    res = client.post("/api/multihop", json={
+        "anchor_prompt": "Lionel Messi plays for",
+        "anchor_subject": "Lionel Messi",
+        "anchor_relation": "plays for",
+        "anchor_target": "Inter Miami",
+        "downstream_queries": [
+            {
+                "prompt": "The home stadium of the team Lionel Messi plays for is",
+                "target": "Chase Stadium",
+                "expected_previous": "Parc des Princes",
+                "hop_depth": 2,
+            }
+        ],
+        "method": "grace",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "compositionality_score" in data
+    assert "logical_soundness" in data
+    assert len(data["hop_results"]) == 1
+
+
+def test_audit_endpoint():
+    res = client.post("/api/audit", json={
+        "reference_texts": ["The sky is blue."],
+        "max_allowed_kl": 2.0,
+        "max_allowed_ppl_ratio": 2.0,
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "verdict" in data
+    assert "pre_edit_perplexity" in data
+    assert "post_edit_perplexity" in data
+    assert "mean_kl_divergence" in data
+
+
+def test_patches_and_rollback_endpoint():
+    res = client.get("/api/patches")
+    assert res.status_code == 200
+    data = res.json()
+    assert "total_patches" in data
+    assert "patches" in data
+
+    res_rollback = client.post("/api/rollback", json={"rollback_all": False})
+    assert res_rollback.status_code == 200
+    data_rollback = res_rollback.json()
+    assert "status" in data_rollback

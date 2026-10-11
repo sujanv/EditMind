@@ -10,20 +10,39 @@ from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel, Field
 
 from editmind.core.registry import EditorRegistry
-from editmind.core.types import EditRequest
+from editmind.core.types import EditRequest, KnowledgeTriple
+from editmind.core.checkpoint import CheckpointManager, EditPatch
 from editmind.models.model_wrapper import UnifiedModelWrapper
 from editmind.models.causal_tracer import CausalTracer
 from editmind.evaluation.evaluator import KnowledgeEditorEvaluator
+from editmind.evaluation.multihop import (
+    MultiHopChain,
+    MultiHopQuery,
+    MultiHopEvaluator,
+    create_sample_multihop_chains,
+)
 from editmind.visualization.causal_plots import generate_svg_causal_heatmap
 from editmind.visualization.radar_chart import generate_svg_radar_chart
 from editmind.continual import ContinualKnowledgeEditor, generate_svg_interference_matrix
-from editmind.safety import KnowledgeConflictDetector, MachineUnlearner
-from editmind.server.schemas import EditApiRequest, TraceApiRequest, CompareApiRequest
+from editmind.safety import (
+    KnowledgeConflictDetector,
+    MachineUnlearner,
+    KnowledgeDriftAuditor,
+    AuditReport,
+)
+from editmind.server.schemas import (
+    EditApiRequest,
+    TraceApiRequest,
+    CompareApiRequest,
+    MultiHopApiRequest,
+    AuditApiRequest,
+    RollbackApiRequest,
+)
 
 app = FastAPI(
     title="EditMind API",
     description="Knowledge Editing Framework for Large Language Models",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -36,6 +55,9 @@ app.add_middleware(
 
 _GLOBAL_WRAPPER = None
 _CONFLICT_DETECTOR = KnowledgeConflictDetector()
+_CHECKPOINT_MGR = CheckpointManager()
+_AUDITOR = KnowledgeDriftAuditor()
+_MULTIHOP_EVALUATOR = MultiHopEvaluator()
 
 
 def get_model_wrapper() -> UnifiedModelWrapper:
@@ -219,6 +241,98 @@ def check_knowledge_conflict(req: EditApiRequest):
     )
     report = _CONFLICT_DETECTOR.check_request(edit_req)
     return report.to_dict()
+
+
+@app.post("/api/multihop")
+def perform_multihop_eval(req: MultiHopApiRequest):
+    wrapper = get_model_wrapper()
+    downstream = [
+        MultiHopQuery(
+            prompt=q["prompt"],
+            target=q["target"],
+            expected_previous=q.get("expected_previous"),
+            hop_depth=q.get("hop_depth", 2),
+            description=q.get("description", ""),
+        )
+        for q in req.downstream_queries
+    ]
+    chain = MultiHopChain(
+        chain_id=f"chain_{req.anchor_subject.lower().replace(' ', '_')}",
+        anchor_fact=KnowledgeTriple(
+            subject=req.anchor_subject,
+            relation=req.anchor_relation,
+            target=req.anchor_target,
+        ),
+        anchor_prompt=req.anchor_prompt,
+        downstream_queries=downstream,
+    )
+    result = _MULTIHOP_EVALUATOR.evaluate_chain(wrapper, chain)
+    return {
+        "chain_id": result.chain_id,
+        "anchor_efficacy": result.anchor_efficacy,
+        "anchor_predicted": result.anchor_predicted,
+        "compositionality_score": result.compositionality_score,
+        "logical_soundness": result.logical_soundness,
+        "passed_all_hops": result.passed_all_hops,
+        "hop_results": result.hop_results,
+    }
+
+
+@app.post("/api/audit")
+def perform_safety_audit(req: AuditApiRequest):
+    wrapper = get_model_wrapper()
+    ref_wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6, seed=42)
+    auditor = KnowledgeDriftAuditor(
+        max_allowed_kl=req.max_allowed_kl,
+        max_allowed_ppl_ratio=req.max_allowed_ppl_ratio,
+    )
+    report = auditor.audit(ref_wrapper, wrapper, reference_corpus=req.reference_texts)
+    return {
+        "pre_edit_perplexity": report.pre_edit_perplexity,
+        "post_edit_perplexity": report.post_edit_perplexity,
+        "perplexity_drift_ratio": report.perplexity_drift_ratio,
+        "mean_kl_divergence": report.mean_kl_divergence,
+        "min_token_entropy": report.min_token_entropy,
+        "entropy_collapse_detected": report.entropy_collapse_detected,
+        "verdict": report.verdict,
+        "violations": report.violations,
+        "is_safe": report.is_safe,
+    }
+
+
+@app.get("/api/patches")
+def list_delta_patches():
+    return {
+        "total_patches": len(_CHECKPOINT_MGR.patch_history),
+        "patches": [
+            {
+                "patch_id": p.patch_id,
+                "editor": p.editor_name,
+                "target": p.target_triple,
+                "sha256": p.sha256,
+                "timestamp": p.timestamp,
+                "num_layers_modified": len(p.layer_deltas),
+            }
+            for p in _CHECKPOINT_MGR.patch_history
+        ],
+    }
+
+
+@app.post("/api/rollback")
+def rollback_edit(req: RollbackApiRequest):
+    wrapper = get_model_wrapper()
+    if req.rollback_all:
+        count = _CHECKPOINT_MGR.rollback_all(wrapper)
+        return {"status": "success", "rolled_back_count": count}
+
+    rolled = _CHECKPOINT_MGR.rollback_latest(wrapper)
+    if not rolled:
+        return {"status": "noop", "message": "No patches available to rollback."}
+    return {
+        "status": "success",
+        "rolled_back_patch": rolled.patch_id,
+        "remaining_patches": len(_CHECKPOINT_MGR.patch_history),
+    }
 
 
 dashboard_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "dashboard")
