@@ -216,7 +216,8 @@ class UnifiedModelWrapper(BaseModelWrapper):
         self.num_layers = getattr(model, "num_layers", len(getattr(model, "layers", [])))
 
     @classmethod
-    def create_toy_model(cls, hidden_dim: int = 128, num_layers: int = 6) -> UnifiedModelWrapper:
+    def create_toy_model(cls, hidden_dim: int = 128, num_layers: int = 6, seed: int = 42) -> UnifiedModelWrapper:
+        torch.manual_seed(seed)
         tokenizer = SimpleTokenizer()
         model = ToyCausalLM(
             vocab_size=max(1000, tokenizer.vocab_size + 100),
