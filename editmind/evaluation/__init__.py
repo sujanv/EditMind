@@ -6,6 +6,13 @@ from editmind.evaluation.metrics import (
 )
 from editmind.evaluation.evaluator import KnowledgeEditorEvaluator
 from editmind.evaluation.comparison import MethodComparator
+from editmind.evaluation.multihop import (
+    MultiHopChain,
+    MultiHopQuery,
+    MultiHopResult,
+    MultiHopEvaluator,
+    create_sample_multihop_chains,
+)
 
 __all__ = [
     "compute_efficacy_score",
@@ -14,4 +21,9 @@ __all__ = [
     "compute_portability_score",
     "KnowledgeEditorEvaluator",
     "MethodComparator",
+    "MultiHopChain",
+    "MultiHopQuery",
+    "MultiHopResult",
+    "MultiHopEvaluator",
+    "create_sample_multihop_chains",
 ]
