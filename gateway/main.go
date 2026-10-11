@@ -257,6 +257,60 @@ func (s *GatewayServer) HandleAudit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type MultiHopChainRequest struct {
+	AnchorSubject string `json:"anchor_subject"`
+	HopRelation   string `json:"hop_relation"`
+}
+
+type MultiHopChainResponse struct {
+	ResolvedTarget string   `json:"resolved_target"`
+	TraversalPath  []string `json:"traversal_path"`
+	HopsCount      int      `json:"hops_count"`
+	Found          bool     `json:"found"`
+}
+
+func (s *GatewayServer) ResolveMultiHop(anchor string, relation string) (string, []string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	key := strings.ToLower(strings.TrimSpace(anchor))
+	firstEdit, exists := s.edits[key]
+	if !exists {
+		return "", nil, false
+	}
+
+	path := []string{firstEdit.Subject, firstEdit.Target}
+	targetKey := strings.ToLower(strings.TrimSpace(firstEdit.Target))
+	if secondEdit, exists2 := s.edits[targetKey]; exists2 {
+		path = append(path, secondEdit.Target)
+		return secondEdit.Target, path, true
+	}
+
+	return firstEdit.Target, path, true
+}
+
+func (s *GatewayServer) HandleMultiHopResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req MultiHopChainRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	target, path, found := s.ResolveMultiHop(req.AnchorSubject, req.HopRelation)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(MultiHopChainResponse{
+		ResolvedTarget: target,
+		TraversalPath:  path,
+		HopsCount:      len(path) - 1,
+		Found:          found,
+	})
+}
+
 func main() {
 	server := NewGatewayServer()
 
@@ -264,6 +318,7 @@ func main() {
 	http.HandleFunc("/metrics", server.HandleMetrics)
 	http.HandleFunc("/api/gateway/edit", server.HandleRegisterEdit)
 	http.HandleFunc("/api/gateway/query", server.HandleQuery)
+	http.HandleFunc("/api/gateway/multihop", server.HandleMultiHopResolve)
 	http.HandleFunc("/api/gateway/audit", server.HandleAudit)
 
 	port := ":8080"

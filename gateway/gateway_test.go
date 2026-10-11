@@ -75,3 +75,56 @@ func TestGatewayRegistrationAndQuery(t *testing.T) {
 		t.Fatalf("Expected predicted Rome, got %s", resp.Predicted)
 	}
 }
+
+func TestMultiHopResolution(t *testing.T) {
+	server := NewGatewayServer()
+
+	// Hop 1: Messi -> Inter Miami
+	edit1 := KnowledgeEdit{
+		Subject:  "Messi",
+		Relation: "plays for",
+		Target:   "Inter Miami",
+	}
+	// Hop 2: Inter Miami -> Chase Stadium
+	edit2 := KnowledgeEdit{
+		Subject:  "Inter Miami",
+		Relation: "stadium",
+		Target:   "Chase Stadium",
+	}
+
+	body1, _ := json.Marshal(edit1)
+	req1 := httptest.NewRequest(http.MethodPost, "/api/gateway/edit", bytes.NewBuffer(body1))
+	server.HandleRegisterEdit(httptest.NewRecorder(), req1)
+
+	body2, _ := json.Marshal(edit2)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/gateway/edit", bytes.NewBuffer(body2))
+	server.HandleRegisterEdit(httptest.NewRecorder(), req2)
+
+	// Test multi-hop resolution
+	target, path, found := server.ResolveMultiHop("Messi", "stadium")
+	if !found {
+		t.Fatalf("Expected multi-hop chain to be found")
+	}
+	if target != "Chase Stadium" {
+		t.Fatalf("Expected target 'Chase Stadium', got '%s'", target)
+	}
+	if len(path) != 3 {
+		t.Fatalf("Expected path length 3 [Messi -> Inter Miami -> Chase Stadium], got %d", len(path))
+	}
+
+	// Test via HTTP endpoint
+	mReq := MultiHopChainRequest{AnchorSubject: "Messi", HopRelation: "stadium"}
+	mBody, _ := json.Marshal(mReq)
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/gateway/multihop", bytes.NewBuffer(mBody))
+	w := httptest.NewRecorder()
+	server.HandleMultiHopResolve(w, httpReq)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d", w.Code)
+	}
+	var mResp MultiHopChainResponse
+	json.NewDecoder(w.Body).Decode(&mResp)
+	if !mResp.Found || mResp.ResolvedTarget != "Chase Stadium" {
+		t.Fatalf("Endpoint returned unexpected response: %+v", mResp)
+	}
+}
