@@ -94,7 +94,7 @@ Evaluated on the **CounterFact Benchmark** across 5 core dimensions:
 ```
 EditMind Architecture
 ├── editmind/
-│   ├── core/                  # Data types, BaseKnowledgeEditor, Registry, YAML configs
+│   ├── core/                  # Types, BaseKnowledgeEditor, Registry, CheckpointManager & Rollback
 │   ├── models/                # Unified model wrappers, ToyCausalLM, PyTorch hooks, CausalTracer
 │   ├── editors/               # Knowledge editing implementations
 │   │   ├── rome/              # Rank-One Model Editing
@@ -106,15 +106,15 @@ EditMind Architecture
 │   │   ├── ike/               # In-Context Demonstration Retrieval
 │   │   └── ft/                # Constrained FT-L & LoRA-Edit
 │   ├── continual/             # Lifelong sequential editing & interference matrix tracker
-│   ├── safety/                # Machine unlearning (PII erasure) & conflict detector
+│   ├── safety/                # Machine unlearning, conflict detector, & drift auditor
 │   ├── multilingual/          # Cross-lingual transfer evaluation & dataset loaders
 │   ├── data/                  # Standard benchmark loaders (CounterFact, ZsRE, RippleEdits)
-│   ├── evaluation/            # 5-Dimensional evaluation suite & comparative analyzer
+│   ├── evaluation/            # 5D evaluation suite, multi-hop reasoning, & comparator
 │   ├── visualization/         # Causal heatmaps, interference matrices, radar charts
 │   ├── server/                # FastAPI backend & REST endpoints
 │   └── cli/                   # Unified command-line interface
 ├── dashboard/                 # Sleek dark-mode Web Studio visualizer
-├── gateway/                   # High-performance Go microservice proxy & vector cache
+├── gateway/                   # High-performance Go microservice proxy, vector cache & multi-hop graph
 └── scripts/                   # Benchmarks, demos, and staggered pusher daemon
 ```
 
@@ -214,12 +214,71 @@ if report.has_conflict:
     print(f"Conflict: {report.explanation}")
 ```
 
+### 3. Knowledge Drift & Capability Retention Auditor
+Detects catastrophic semantic drift, KL-divergence inflation, and output entropy collapse (degenerate repetition loops):
+
+```python
+from editmind.safety import KnowledgeDriftAuditor
+
+auditor = KnowledgeDriftAuditor(max_allowed_kl=1.25, max_allowed_ppl_ratio=1.40)
+report = auditor.audit(model_pre, model_post)
+print(f"Audit Verdict: {report.verdict} | Mean KL: {report.mean_kl_divergence:.4f}")
+```
+
+Or via CLI:
+```bash
+editmind audit --method rome --prompt "The Eiffel Tower is in" --target "Rome"
+```
+
+---
+
+## 🔗 Multi-Hop Reasoning & Ripple Propagation
+
+When an anchor fact $(A, r_1, B)$ is edited (e.g. *Lionel Messi plays for Inter Miami*), downstream multi-hop reasoning chains ($A \to B \to C$, e.g. *The stadium of the team Messi plays for is Chase Stadium*) must logically propagate without retaining stale associations.
+
+```python
+from editmind.evaluation import MultiHopEvaluator, create_sample_multihop_chains
+
+evaluator = MultiHopEvaluator()
+chains = create_sample_multihop_chains()
+summary = evaluator.evaluate_benchmark(model, chains)
+
+print(f"Compositionality (C-Score): {summary['avg_compositionality'] * 100:.1f}%")
+print(f"Logical Soundness Score  : {summary['avg_soundness'] * 100:.1f}%")
+```
+
+Or run via CLI:
+```bash
+editmind multihop --samples 2
+```
+
+---
+
+## 💾 Delta Checkpointing & Atomic Rollbacks
+
+Instead of saving full multi-gigabyte models for every edit, EditMind isolates parameter differences ($\Delta W = W_{post} - W_{pre}$), generates a lightweight cryptographic `.editpatch` file with SHA-256 integrity verification, and supports instant forward/rollback state restoration:
+
+```python
+from editmind.core import CheckpointManager
+
+mgr = CheckpointManager()
+patch = mgr.capture_deltas(model_before, model_after, editor_name="ROME", target_triple=triple)
+print(f"Patch captured: {patch.patch_id} (SHA256: {patch.sha256[:12]}...)")
+
+# Atomic rollback in-place
+mgr.rollback_patch(model_after, patch)
+
+# Re-apply forward
+mgr.apply_patch(model_after, patch)
+```
+
 ---
 
 ## ⚡ Go Microservice Gateway
 
-A production Golang service located in [`gateway/`](gateway/):
-- **Sub-Millisecond Interception**: Resolves queries matching edited memory prior to executing heavy deep neural layers.
+A high-performance Golang service located in [`gateway/`](gateway/):
+- **Sub-Millisecond Interception**: Resolves queries matching edited memory prior to executing heavy neural layers.
+- **Multi-Hop Traversal Graph**: Traverses chained relations ($A \to B \to C$) in memory in microseconds.
 - **Semantic Vector Similarity Cache**: Built-in cosine similarity matching ($\ge 0.85$) on vector embeddings.
 - **Token-Bucket Rate Limiter**: Built-in burst handling (100 burst, 50 req/sec refill).
 - **Prometheus Metrics**: Exposes `/metrics` endpoint with request counters and latency telemetry.
@@ -227,6 +286,7 @@ A production Golang service located in [`gateway/`](gateway/):
 
 ```bash
 cd gateway
+go test -v ./...
 go build -o editmind-gateway main.go
 ./editmind-gateway
 # Active on http://localhost:8080
@@ -242,14 +302,19 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 - **Comparative Radar**: 5-axis polygon visualizer comparing all paradigms.
 - **Continual Matrix**: Live $T \times T$ interference heatmap tracking sequential memory retention.
 - **Safety Sandbox**: Machine unlearning and knowledge contradiction testbed.
+- **Multi-Hop & Audit Panel**: Test logical ripple propagation, audit KL-divergence drift, and rollback edit patches.
 
 ---
 
 ## 🧪 Testing & Verification
 
-Run the full automated test suite:
+Run the automated test suite across Python 3.10, 3.11, and 3.12:
 ```bash
+# Python Unit Tests (45 automated tests)
 pytest tests/ -v
+
+# Go Gateway Tests
+cd gateway && go test -v ./...
 ```
 
 ---

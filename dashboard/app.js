@@ -253,4 +253,116 @@ document.addEventListener("DOMContentLoaded", () => {
       resultContainer.innerHTML = `<p style="color:#f38ba8;">Error unlearning fact: ${err.message}</p>`;
     }
   });
+
+  // Multi-Hop Evaluate Button
+  document.getElementById("btn-run-multihop").addEventListener("click", async () => {
+    const resultsContainer = document.getElementById("multihop-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Evaluating multi-hop ripple propagation across reasoning chains...</p>`;
+
+    try {
+      const res = await fetch("/api/multihop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          anchor_prompt: "Lionel Messi plays for",
+          anchor_subject: "Lionel Messi",
+          anchor_relation: "plays for",
+          anchor_target: "Inter Miami",
+          downstream_queries: [
+            {
+              prompt: "The home stadium of the team Lionel Messi plays for is",
+              target: "Chase Stadium",
+              expected_previous: "Parc des Princes",
+              hop_depth: 2
+            },
+            {
+              prompt: "The league that the team Lionel Messi plays for competes in is",
+              target: "Major League Soccer",
+              expected_previous: "Ligue 1",
+              hop_depth: 2
+            }
+          ],
+          method: "grace"
+        })
+      });
+      const data = await res.json();
+
+      let hopRows = data.hop_results.map(h => `
+        <div style="background:#1e1e2e; padding:8px 12px; margin-bottom:6px; border-radius:6px; border-left:3px solid ${h.correct ? '#a6e3a1' : '#f38ba8'};">
+          <div style="font-weight:600; font-size:13px;">${h.prompt}</div>
+          <div style="font-size:12px; color:#cdd6f4;">Predicted: <code>"${h.predicted}"</code> &bull; Expected: <code>"${h.target}"</code> &bull; Stale: <code>"${h.expected_previous}"</code></div>
+          <div style="font-size:11px; color:${h.correct ? '#a6e3a1' : '#f9e2af'};">${h.correct ? '✅ Logically Propagated' : (h.retained_stale_knowledge ? '⚠️ Stale Memory Leakage' : '❌ Unresolved')}</div>
+        </div>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🔗 Multi-Hop Reasoning Assessment</h4>
+          <p><strong>Anchor Prediction:</strong> "${data.anchor_predicted}" &bull; <strong>Anchor Efficacy:</strong> ${(data.anchor_efficacy * 100).toFixed(0)}%</p>
+          <p><strong>Compositionality Score:</strong> ${(data.compositionality_score * 100).toFixed(1)}% &bull; <strong>Logical Soundness:</strong> ${(data.logical_soundness * 100).toFixed(1)}%</p>
+          <hr style="border-color:#45475a; margin:10px 0;">
+          <h5 style="margin-bottom:8px;">Downstream Multi-Hop Inferences:</h5>
+          ${hopRows}
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error evaluating multi-hop: ${err.message}</p>`;
+    }
+  });
+
+  // Audit Model Drift Button
+  document.getElementById("btn-run-audit").addEventListener("click", async () => {
+    const resultsContainer = document.getElementById("multihop-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Auditing general language capability retention and KL-divergence...</p>`;
+
+    try {
+      const res = await fetch("/api/audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          max_allowed_kl: 1.25,
+          max_allowed_ppl_ratio: 1.40
+        })
+      });
+      const data = await res.json();
+      const verdictColor = data.verdict === "PASS" ? "#a6e3a1" : (data.verdict === "WARNING" ? "#f9e2af" : "#f38ba8");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🛡️ Safety & Capability Audit Report</h4>
+          <div style="display:inline-block; padding:4px 12px; border-radius:12px; font-weight:bold; font-size:12px; background:${verdictColor}22; color:${verdictColor}; border:1px solid ${verdictColor}; margin-bottom:12px;">
+            VERDICT: ${data.verdict}
+          </div>
+          <p><strong>Perplexity Pre:</strong> ${data.pre_edit_perplexity} &bull; <strong>Perplexity Post:</strong> ${data.post_edit_perplexity} (Ratio: ${data.perplexity_drift_ratio})</p>
+          <p><strong>Distributional KL Divergence:</strong> ${data.mean_kl_divergence} &bull; <strong>Min Token Entropy:</strong> ${data.min_token_entropy}</p>
+          <p><strong>Entropy Collapse Detected:</strong> ${data.entropy_collapse_detected ? '🚨 YES' : '✅ NO'}</p>
+          ${data.violations.length ? `<p style="color:#f38ba8;"><strong>Violations:</strong> ${data.violations.join('; ')}</p>` : ''}
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error auditing model: ${err.message}</p>`;
+    }
+  });
+
+  // Rollback Button
+  document.getElementById("btn-rollback").addEventListener("click", async () => {
+    const resultsContainer = document.getElementById("multihop-results");
+    try {
+      const res = await fetch("/api/rollback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rollback_all: false })
+      });
+      const data = await res.json();
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>⏮️ Rollback Operation</h4>
+          <p><strong>Status:</strong> ${data.status}</p>
+          <p><strong>Message / Patch:</strong> ${data.message || data.rolled_back_patch || 'Completed'}</p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error executing rollback: ${err.message}</p>`;
+    }
+  });
 });

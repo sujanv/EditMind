@@ -100,6 +100,7 @@
           <button class="tab-btn" data-tab="tab-radar">🌐 Radar Benchmark</button>
           <button class="tab-btn" data-tab="tab-continual">🔄 Continual Matrix</button>
           <button class="tab-btn" data-tab="tab-safety">🛡️ Safety Unlearning</button>
+          <button class="tab-btn" data-tab="tab-multihop">🔗 Multi-Hop &amp; Audit</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -150,6 +151,20 @@
           </div>
           <button type="button" id="btn-unlearn" class="btn btn-accent">🚫 Unlearn Private Fact</button>
           <div id="unlearn-results" style="margin-top:16px;"></div>
+        </div>
+
+        <!-- Tab 6: Multi-Hop Reasoning & Drift Audit -->
+        <div class="tab-pane" id="tab-multihop">
+          <h3>🔗 Multi-Hop Reasoning &amp; Capability Retention Audit</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Evaluate how edits propagate across multi-hop reasoning chains, check distributional drift (KL-Divergence), and manage atomic delta rollbacks.</p>
+          
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+            <button type="button" id="btn-run-multihop" class="btn btn-secondary">▶️ Evaluate Multi-Hop Chain</button>
+            <button type="button" id="btn-run-audit" class="btn btn-accent">🛡️ Audit Model Drift &amp; Entropy</button>
+            <button type="button" id="btn-rollback" class="btn btn-secondary">⏮️ Rollback Last Edit Patch</button>
+          </div>
+
+          <div id="multihop-results" style="margin-top:12px;"></div>
         </div>
       </section>
     </main>
