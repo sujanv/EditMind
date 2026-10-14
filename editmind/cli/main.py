@@ -13,8 +13,15 @@ from editmind.data import load_counterfact_dataset, load_zsre_dataset, load_ripp
 from editmind.evaluation.comparison import MethodComparator
 from editmind.visualization.causal_plots import render_ascii_causal_heatmap
 from editmind.continual import ContinualKnowledgeEditor, render_ascii_interference_matrix
-from editmind.safety import KnowledgeConflictDetector, MachineUnlearner, KnowledgeDriftAuditor
+from editmind.safety import (
+    KnowledgeConflictDetector,
+    MachineUnlearner,
+    KnowledgeDriftAuditor,
+    KnowledgeConflictResolver,
+    ResolutionStrategy,
+)
 from editmind.evaluation.multihop import MultiHopEvaluator, create_sample_multihop_chains
+from editmind.evaluation.factuality import SemanticEntropyEvaluator
 
 
 def main():
@@ -58,6 +65,22 @@ def main():
     audit_parser.add_argument("--method", type=str, default="rome", choices=EditorRegistry.list_available())
     audit_parser.add_argument("--prompt", type=str, default="The Eiffel Tower is in")
     audit_parser.add_argument("--target", type=str, default="Rome")
+
+    # Command: factcheck
+    factcheck_parser = subparsers.add_parser("factcheck", help="Evaluate post-edit semantic entropy & hallucination stability")
+    factcheck_parser.add_argument("--prompt", type=str, default="The Eiffel Tower is in")
+    factcheck_parser.add_argument("--target", type=str, default="Rome")
+    factcheck_parser.add_argument("--samples", type=int, default=5)
+    factcheck_parser.add_argument("--temp", type=float, default=0.7)
+
+    # Command: resolve
+    resolve_parser = subparsers.add_parser("resolve", help="Resolve contradictory knowledge edits via automated policy")
+    resolve_parser.add_argument("--subject", type=str, required=True)
+    resolve_parser.add_argument("--relation", type=str, required=True)
+    resolve_parser.add_argument("--target", type=str, required=True)
+    resolve_parser.add_argument("--strategy", type=str, default="latest_wins", choices=["latest_wins", "confidence_weighted", "temporal_scoping", "merge_multi_valued", "reject_on_conflict"])
+    resolve_parser.add_argument("--confidence", type=float, default=1.0)
+    resolve_parser.add_argument("--valid-from", type=str, default=None)
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
@@ -144,6 +167,48 @@ def main():
         print(f"Entropy Collapse     : {'YES (DANGER)' if report.entropy_collapse_detected else 'NO (HEALTHY)'}")
         if report.violations:
             print(f"Violations           : {', '.join(report.violations)}")
+
+    elif args.command == "factcheck":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        evaluator = SemanticEntropyEvaluator()
+        print(f"\n[EditMind] Sampling {args.samples} generations (T={args.temp}) to evaluate factuality stability for '{args.prompt}' -> '{args.target}'...")
+        report = evaluator.evaluate_edit_stability(
+            model=wrapper,
+            prompt=args.prompt,
+            target_new=args.target,
+            num_samples=args.samples,
+            temperature=args.temp,
+        )
+        print(f"Semantic Entropy (SE): {report.semantic_entropy:.4f}")
+        print(f"Confidently Stable   : {'YES' if report.is_confidently_stable else 'NO (High Uncertainty)'}")
+        print(f"Target Adherence Rate: {report.target_adherence_rate * 100:.1f}%")
+        print(f"Hallucination Risk   : {report.hallucination_risk_score * 100:.1f}%")
+        print(f"Semantic Clusters    : {len(report.clusters)}")
+        for idx, cl in enumerate(report.clusters):
+            print(f"  Cluster {idx+1}: '{cl['canonical']}' (P = {cl['probability']:.2f}, n = {cl['frequency']})")
+
+    elif args.command == "resolve":
+        resolver = KnowledgeConflictResolver()
+        req = EditRequest(
+            prompt=f"{args.subject} {args.relation}",
+            target_new=args.target,
+            subject=args.subject,
+            relation=args.relation,
+        )
+        strat = ResolutionStrategy(args.strategy)
+        decision = resolver.resolve(
+            request=req,
+            strategy=strat,
+            valid_from=args.valid_from,
+            confidence=args.confidence,
+        )
+        print(f"\n[EditMind] Knowledge Conflict Resolution Report:")
+        print(f"Action               : {decision.action}")
+        print(f"Strategy Applied     : {decision.strategy_applied.value}")
+        print(f"Effective Target     : {decision.effective_target}")
+        print(f"Reason               : {decision.reason}")
+        if decision.audit_notes:
+            print(f"Audit Notes          : {'; '.join(decision.audit_notes)}")
 
     elif args.command == "benchmark":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)

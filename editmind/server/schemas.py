@@ -47,3 +47,21 @@ class AuditApiRequest(BaseModel):
 class RollbackApiRequest(BaseModel):
     patch_id: Optional[str] = Field(None)
     rollback_all: bool = Field(False)
+
+
+class FactualityApiRequest(BaseModel):
+    prompt: str = Field(..., json_schema_extra={"example": "The Eiffel Tower is in"})
+    target_new: str = Field(..., json_schema_extra={"example": "Rome"})
+    num_samples: int = Field(5, json_schema_extra={"example": 5})
+    temperature: float = Field(0.7, json_schema_extra={"example": 0.7})
+
+
+class ResolveConflictApiRequest(BaseModel):
+    prompt: str = Field(..., json_schema_extra={"example": "Lionel Messi plays for"})
+    target_new: str = Field(..., json_schema_extra={"example": "Inter Miami"})
+    subject: str = Field(..., json_schema_extra={"example": "Lionel Messi"})
+    relation: str = Field(..., json_schema_extra={"example": "plays for"})
+    strategy: str = Field("latest_wins", json_schema_extra={"example": "latest_wins"})
+    valid_from: Optional[str] = Field(None, json_schema_extra={"example": "2023"})
+    valid_to: Optional[str] = Field(None)
+    confidence: float = Field(1.0, json_schema_extra={"example": 1.0})

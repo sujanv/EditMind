@@ -148,3 +148,36 @@ def test_patches_and_rollback_endpoint():
     assert res_rollback.status_code == 200
     data_rollback = res_rollback.json()
     assert "status" in data_rollback
+
+
+def test_factuality_endpoint():
+    res = client.post("/api/factuality", json={
+        "prompt": "The Eiffel Tower is in",
+        "target_new": "Rome",
+        "num_samples": 3,
+        "temperature": 0.5,
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "semantic_entropy" in data
+    assert "is_confidently_stable" in data
+    assert "target_adherence_rate" in data
+    assert "hallucination_risk_score" in data
+    assert len(data["sampled_generations"]) == 3
+
+
+def test_resolve_conflict_endpoint():
+    res = client.post("/api/resolve-conflict", json={
+        "prompt": "Lionel Messi plays for",
+        "target_new": "Inter Miami",
+        "subject": "Lionel Messi",
+        "relation": "plays for",
+        "strategy": "latest_wins",
+        "valid_from": "2023",
+        "confidence": 0.95,
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["action"] in ("ACCEPTED", "SUPERSEDED", "TEMPORAL_SPLIT", "MERGED")
+    assert data["effective_target"] == "Inter Miami"
+    assert "resolved_fact" in data

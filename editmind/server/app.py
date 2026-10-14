@@ -29,7 +29,10 @@ from editmind.safety import (
     MachineUnlearner,
     KnowledgeDriftAuditor,
     AuditReport,
+    KnowledgeConflictResolver,
+    ResolutionStrategy,
 )
+from editmind.evaluation.factuality import SemanticEntropyEvaluator, FactualityReport
 from editmind.server.schemas import (
     EditApiRequest,
     TraceApiRequest,
@@ -37,12 +40,14 @@ from editmind.server.schemas import (
     MultiHopApiRequest,
     AuditApiRequest,
     RollbackApiRequest,
+    FactualityApiRequest,
+    ResolveConflictApiRequest,
 )
 
 app = FastAPI(
     title="EditMind API",
     description="Knowledge Editing Framework for Large Language Models",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 app.add_middleware(
@@ -55,9 +60,11 @@ app.add_middleware(
 
 _GLOBAL_WRAPPER = None
 _CONFLICT_DETECTOR = KnowledgeConflictDetector()
+_CONFLICT_RESOLVER = KnowledgeConflictResolver()
 _CHECKPOINT_MGR = CheckpointManager()
 _AUDITOR = KnowledgeDriftAuditor()
 _MULTIHOP_EVALUATOR = MultiHopEvaluator()
+_FACTUALITY_EVALUATOR = SemanticEntropyEvaluator()
 
 
 def get_model_wrapper() -> UnifiedModelWrapper:
@@ -332,6 +339,65 @@ def rollback_edit(req: RollbackApiRequest):
         "status": "success",
         "rolled_back_patch": rolled.patch_id,
         "remaining_patches": len(_CHECKPOINT_MGR.patch_history),
+    }
+
+
+@app.post("/api/factuality")
+def evaluate_factuality_stability(req: FactualityApiRequest):
+    wrapper = get_model_wrapper()
+    report = _FACTUALITY_EVALUATOR.evaluate_edit_stability(
+        model=wrapper,
+        prompt=req.prompt,
+        target_new=req.target_new,
+        num_samples=req.num_samples,
+        temperature=req.temperature,
+    )
+    return {
+        "prompt": report.prompt,
+        "target_new": report.target_new,
+        "num_samples": report.num_samples,
+        "temperature": report.temperature,
+        "semantic_entropy": report.semantic_entropy,
+        "is_confidently_stable": report.is_confidently_stable,
+        "target_adherence_rate": report.target_adherence_rate,
+        "hallucination_risk_score": report.hallucination_risk_score,
+        "clusters": report.clusters,
+        "sampled_generations": report.sampled_generations,
+    }
+
+
+@app.post("/api/resolve-conflict")
+def resolve_knowledge_conflict(req: ResolveConflictApiRequest):
+    edit_req = EditRequest(
+        prompt=req.prompt,
+        target_new=req.target_new,
+        subject=req.subject,
+        relation=req.relation,
+    )
+    strat = ResolutionStrategy(req.strategy) if req.strategy in [s.value for s in ResolutionStrategy] else ResolutionStrategy.LATEST_WINS
+    decision = _CONFLICT_RESOLVER.resolve(
+        request=edit_req,
+        strategy=strat,
+        valid_from=req.valid_from,
+        valid_to=req.valid_to,
+        confidence=req.confidence,
+    )
+    return {
+        "action": decision.action,
+        "strategy_applied": decision.strategy_applied.value,
+        "effective_target": decision.effective_target,
+        "reason": decision.reason,
+        "resolved_fact": {
+            "subject": decision.resolved_fact.subject,
+            "relation": decision.resolved_fact.relation,
+            "target": decision.resolved_fact.target,
+            "valid_from": decision.resolved_fact.valid_from,
+            "valid_to": decision.resolved_fact.valid_to,
+            "confidence": decision.resolved_fact.confidence,
+            "version": decision.resolved_fact.version,
+            "superseded_by": decision.resolved_fact.superseded_by,
+        },
+        "audit_notes": decision.audit_notes,
     }
 
 
