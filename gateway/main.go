@@ -4,11 +4,14 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"net/http"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -78,19 +81,32 @@ type GatewayServer struct {
 	edits       map[string]KnowledgeEdit
 	auditLogs   []KnowledgeEdit
 	rateLimiter *TokenBucket
+	walPath     string
+	walMu       sync.Mutex
 
-	// Metrics counters
+	// Metrics and latency counters
 	totalRequests     int64
 	interceptedCount  int64
 	rateLimitedCount  int64
+	latencies         []float64
 }
 
-func NewGatewayServer() *GatewayServer {
-	return &GatewayServer{
+func NewGatewayServer(walPath ...string) *GatewayServer {
+	path := ""
+	if len(walPath) > 0 {
+		path = walPath[0]
+	}
+	s := &GatewayServer{
 		edits:       make(map[string]KnowledgeEdit),
 		auditLogs:   make([]KnowledgeEdit, 0),
 		rateLimiter: NewTokenBucket(100.0, 50.0), // 100 capacity, 50 req/sec refill
+		walPath:     path,
+		latencies:   make([]float64, 0, 1000),
 	}
+	if path != "" {
+		_ = s.ReplayWAL()
+	}
+	return s
 }
 
 func CosineSimilarity(a, b []float64) float64 {
@@ -156,6 +172,7 @@ func (s *GatewayServer) HandleRegisterEdit(w http.ResponseWriter, r *http.Reques
 	s.edits[key] = edit
 	s.auditLogs = append(s.auditLogs, edit)
 	s.mu.Unlock()
+	_ = s.AppendWAL(edit)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -232,6 +249,16 @@ func (s *GatewayServer) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		s.mu.RLock()
 	}
+
+	elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+	s.mu.RUnlock()
+	s.mu.Lock()
+	s.latencies = append(s.latencies, elapsedMs)
+	if len(s.latencies) > 5000 {
+		s.latencies = s.latencies[1000:]
+	}
+	s.mu.Unlock()
+	s.mu.RLock()
 
 	resp := QueryResponse{
 		Prompt:       req.Prompt,
@@ -311,8 +338,144 @@ func (s *GatewayServer) HandleMultiHopResolve(w http.ResponseWriter, r *http.Req
 	})
 }
 
+func (s *GatewayServer) AppendWAL(edit KnowledgeEdit) error {
+	if s.walPath == "" {
+		return nil
+	}
+	s.walMu.Lock()
+	defer s.walMu.Unlock()
+
+	f, err := os.OpenFile(s.walPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	bytes, err := json.Marshal(edit)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(string(bytes) + "\n")
+	return err
+}
+
+func (s *GatewayServer) ReplayWAL() error {
+	if s.walPath == "" {
+		return nil
+	}
+	s.walMu.Lock()
+	defer s.walMu.Unlock()
+
+	f, err := os.Open(s.walPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var edit KnowledgeEdit
+		if err := json.Unmarshal([]byte(line), &edit); err == nil {
+			key := strings.ToLower(strings.TrimSpace(edit.Subject))
+			s.edits[key] = edit
+			s.auditLogs = append(s.auditLogs, edit)
+		}
+	}
+	return scanner.Err()
+}
+
+func (s *GatewayServer) CalculatePercentiles() (p50, p90, p99 float64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.latencies) == 0 {
+		return 0, 0, 0
+	}
+	copied := make([]float64, len(s.latencies))
+	copy(copied, s.latencies)
+	sort.Float64s(copied)
+
+	n := len(copied)
+	p50 = copied[int(float64(n)*0.50)]
+	p90 = copied[int(float64(n)*0.90)]
+	p99 = copied[int(float64(n)*0.99)]
+	return p50, p90, p99
+}
+
+func (s *GatewayServer) HandleStats(w http.ResponseWriter, r *http.Request) {
+	p50, p90, p99 := s.CalculatePercentiles()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_requests":     s.totalRequests,
+		"intercepted_count":  s.interceptedCount,
+		"rate_limited_count": s.rateLimitedCount,
+		"active_edits_count": len(s.edits),
+		"latency_p50_ms":     p50,
+		"latency_p90_ms":     p90,
+		"latency_p99_ms":     p99,
+	})
+}
+
+func (s *GatewayServer) HandleSnapshotExport(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"active_edits": len(s.edits),
+		"edits":        s.edits,
+		"audit_trail":  s.auditLogs,
+		"exported_at":  time.Now(),
+	})
+}
+
+func (s *GatewayServer) HandleSnapshotImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		Edits      map[string]KnowledgeEdit `json:"edits"`
+		AuditTrail []KnowledgeEdit          `json:"audit_trail"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for k, v := range payload.Edits {
+		s.edits[k] = v
+		_ = s.AppendWAL(v)
+	}
+	s.auditLogs = append(s.auditLogs, payload.AuditTrail...)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":         "imported",
+		"imported_edits": len(payload.Edits),
+		"total_edits":    len(s.edits),
+	})
+}
+
 func main() {
-	server := NewGatewayServer()
+	server := NewGatewayServer("gateway_wal.log")
 
 	http.HandleFunc("/health", server.HandleHealth)
 	http.HandleFunc("/metrics", server.HandleMetrics)
@@ -320,6 +483,9 @@ func main() {
 	http.HandleFunc("/api/gateway/query", server.HandleQuery)
 	http.HandleFunc("/api/gateway/multihop", server.HandleMultiHopResolve)
 	http.HandleFunc("/api/gateway/audit", server.HandleAudit)
+	http.HandleFunc("/api/gateway/stats", server.HandleStats)
+	http.HandleFunc("/api/gateway/snapshot/export", server.HandleSnapshotExport)
+	http.HandleFunc("/api/gateway/snapshot/import", server.HandleSnapshotImport)
 
 	port := ":8080"
 	log.Printf("[EditMind] Enhanced Gateway microservice running on http://localhost%s\n", port)

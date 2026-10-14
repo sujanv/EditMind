@@ -128,3 +128,73 @@ func TestMultiHopResolution(t *testing.T) {
 		t.Fatalf("Endpoint returned unexpected response: %+v", mResp)
 	}
 }
+
+func TestWriteAheadLogAndSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	walPath := tmpDir + "/test_wal.log"
+
+	server1 := NewGatewayServer(walPath)
+	edit := KnowledgeEdit{
+		Subject:  "Saturn",
+		Relation: "has rings",
+		Target:   "Yes",
+		Editor:   "rome",
+	}
+	body, _ := json.Marshal(edit)
+	req := httptest.NewRequest(http.MethodPost, "/api/gateway/edit", bytes.NewBuffer(body))
+	server1.HandleRegisterEdit(httptest.NewRecorder(), req)
+
+	// Verify WAL file was created and contains edit
+	server2 := NewGatewayServer(walPath)
+	server2.mu.RLock()
+	replayedEdit, exists := server2.edits["saturn"]
+	server2.mu.RUnlock()
+	if !exists {
+		t.Fatalf("Expected 'saturn' to be recovered from WAL")
+	}
+	if replayedEdit.Target != "Yes" {
+		t.Fatalf("Expected target 'Yes', got '%s'", replayedEdit.Target)
+	}
+
+	// Test snapshot export
+	expReq := httptest.NewRequest(http.MethodGet, "/api/gateway/snapshot/export", nil)
+	expRec := httptest.NewRecorder()
+	server2.HandleSnapshotExport(expRec, expReq)
+	if expRec.Code != http.StatusOK {
+		t.Fatalf("Snapshot export failed: %d", expRec.Code)
+	}
+
+	// Test snapshot import into fresh server
+	server3 := NewGatewayServer()
+	impReq := httptest.NewRequest(http.MethodPost, "/api/gateway/snapshot/import", expRec.Body)
+	impRec := httptest.NewRecorder()
+	server3.HandleSnapshotImport(impRec, impReq)
+	if impRec.Code != http.StatusOK {
+		t.Fatalf("Snapshot import failed: %d", impRec.Code)
+	}
+
+	server3.mu.RLock()
+	_, exists3 := server3.edits["saturn"]
+	server3.mu.RUnlock()
+	if !exists3 {
+		t.Fatalf("Expected 'saturn' to exist after snapshot import")
+	}
+}
+
+func TestLatencyPercentiles(t *testing.T) {
+	server := NewGatewayServer()
+	server.mu.Lock()
+	server.latencies = []float64{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}
+	server.mu.Unlock()
+
+	p50, p90, p99 := server.CalculatePercentiles()
+	if p50 < 5.0 || p50 > 6.0 {
+		t.Fatalf("Expected p50 ~5.5, got %f", p50)
+	}
+	if p90 < 9.0 {
+		t.Fatalf("Expected p90 >= 9.0, got %f", p90)
+	}
+	if p99 < 9.0 {
+		t.Fatalf("Expected p99 >= 9.0, got %f", p99)
+	}
+}
