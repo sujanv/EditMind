@@ -29,7 +29,8 @@ As Large Language Models (LLMs) scale, retraining or full fine-tuning to update 
 4. **Meta-Learning & Hypernetworks**: **MEND** (Gradient Decomposition Networks)
 5. **Explicit Memory & Codebooks**: **GRACE** (Dynamic Epsilon-Ball Activation Memory, 100% Locality)
 6. **Non-Parametric In-Context Retrieval**: **IKE** (Dynamic Demonstration Retrieval)
-7. **Constrained Baselines**: **FT-L** ($L_\infty$-bounded Fine-Tuning) and **LoRA-Edit** (Low-Rank Parameter Adaptation)
+7. **Quantized Low-Bit Editing**: **Q-Edit** (Simulated 4-bit/8-bit Quantized Weight Adaptation with Residual Low-Rank Adapters)
+8. **Constrained Baselines**: **FT-L** ($L_\infty$-bounded Fine-Tuning) and **LoRA-Edit** (Low-Rank Parameter Adaptation)
 
 ---
 
@@ -44,6 +45,7 @@ As Large Language Models (LLMs) scale, retraining or full fine-tuning to update 
 | **Meta-Learning** | **MEND** | Low-rank gradient mapping | Moderate | Fast single-step | Low-rank MLP transformation on gradient factors $\tilde{\delta} \otimes \tilde{u}^T$ |
 | **Activation Cache**| **GRACE** | None ($\Delta W = 0$) | **100% Guaranteed** | Thousands | Dynamic $\epsilon$-ball codebook intercepting layer activations |
 | **Non-Parametric** | **IKE** | None ($\Delta W = 0$) | High | Context-bound | Few-shot analogy & copy demonstration retriever |
+| **Quantized Low-Bit**| **Q-Edit** | Low-rank adapter ($B \times A$) | High | Medium | 4-bit/8-bit weight quantization freeze with trainable low-rank bypass |
 | **Constrained FT** | **FT-L** | Gradient Descent | Low | Degrades | $L_\infty / L_2$ norm-bounded backpropagation |
 | **Parameter-Efficient**| **LoRA-Edit** | Low-rank adapter ($B \times A$) | Moderate | Medium | Target MLP LoRA adapter training with parameter merge |
 
@@ -274,15 +276,48 @@ mgr.apply_patch(model_after, patch)
 
 ---
 
+## 🎯 Semantic Entropy & Post-Edit Factuality Stability
+
+Measuring whether a model actually internalizes an edit or merely hallucinates is solved via stochastic semantic clustering ($T > 0$):
+- **Semantic Clustering**: Groups stochastic completions into equivalence classes $C_k$ to marginalize token-level syntactic variations.
+- **Semantic Entropy**: $SE(x) = -\sum_{k} P(C_k) \ln P(C_k)$ assesses epistemic uncertainty and post-edit hallucination risk.
+- **Target Adherence**: Computes the exact proportion of generations adhering to $y_{new}$.
+
+```bash
+# Evaluate factuality stability via CLI
+editmind factcheck --prompt "The president of France is" --target "Brigitte Macron" --samples 5
+```
+
+---
+
+## ⚖️ Automated Knowledge Conflict Resolution & Temporal Scoping
+
+When editing memories over long horizons, new facts often directly contradict existing beliefs or past edits. EditMind provides a principled conflict engine:
+- **Strategies**:
+  - `latest_wins`: Standard overwrite semantics.
+  - `confidence_weighted`: Preserves the fact with higher epistemic certainty.
+  - `temporal_scoping`: Scopes facts with validity windows (e.g., `valid_from: "2024"`).
+  - `merge_multi_valued`: Aggregates multi-faceted facts (e.g., co-founders, board members).
+  - `reject_on_conflict`: Safety halt when an irreconcilable contradiction is detected.
+
+```bash
+# Resolve conflicting knowledge facts via CLI
+editmind resolve --subject "Steve Jobs" --relation "CEO of" --target "Apple" --strategy temporal_scoping
+```
+
+---
+
 ## ⚡ Go Microservice Gateway
 
 A high-performance Golang service located in [`gateway/`](gateway/):
 - **Sub-Millisecond Interception**: Resolves queries matching edited memory prior to executing heavy neural layers.
 - **Multi-Hop Traversal Graph**: Traverses chained relations ($A \to B \to C$) in memory in microseconds.
+- **Write-Ahead Log (WAL) & Crash Recovery**: Appends all edits to an append-only WAL (`gateway_wal.jsonl`) with instant startup replay.
+- **Snapshot Export & Import**: Atomic JSON export and import (`POST /api/gateway/snapshot/export`, `POST /api/gateway/snapshot/import`).
+- **Rolling Latency Percentiles**: Measures real-time execution performance ($p50, p90, p99$).
 - **Semantic Vector Similarity Cache**: Built-in cosine similarity matching ($\ge 0.85$) on vector embeddings.
 - **Token-Bucket Rate Limiter**: Built-in burst handling (100 burst, 50 req/sec refill).
 - **Prometheus Metrics**: Exposes `/metrics` endpoint with request counters and latency telemetry.
-- **Audit Ledger**: Immutable thread-safe ledger of all memory updates.
 
 ```bash
 cd gateway
@@ -298,11 +333,12 @@ go build -o editmind-gateway main.go
 
 Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 - **Causal Tracing**: SVG layer $\times$ token heatmap identifying factual memory locations.
-- **Probability Shift**: Side-by-side probability bars for target and ground truth.
+- **Probability Shift**: Side-by-side probability bars for target and ground truth across ROME, MEMIT, PMET, AlphaEdit, GRACE, IKE, and Q-Edit.
 - **Comparative Radar**: 5-axis polygon visualizer comparing all paradigms.
 - **Continual Matrix**: Live $T \times T$ interference heatmap tracking sequential memory retention.
 - **Safety Sandbox**: Machine unlearning and knowledge contradiction testbed.
 - **Multi-Hop & Audit Panel**: Test logical ripple propagation, audit KL-divergence drift, and rollback edit patches.
+- **Factuality & Resolution Panel**: Stochastic semantic entropy evaluator and automated conflict resolution testbed.
 
 ---
 
@@ -310,10 +346,10 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 
 Run the automated test suite across Python 3.10, 3.11, and 3.12:
 ```bash
-# Python Unit Tests (45 automated tests)
+# Python Unit Tests (57 automated tests)
 pytest tests/ -v
 
-# Go Gateway Tests
+# Go Gateway Tests (6 unit & benchmark suites)
 cd gateway && go test -v ./...
 ```
 

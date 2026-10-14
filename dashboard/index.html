@@ -49,6 +49,7 @@
               <option value="ike">IKE (In-Context Demonstration Retrieval)</option>
               <option value="ft_l">FT-L (Constrained L-inf Fine-Tuning)</option>
               <option value="lora_edit">LoRA-Edit (Low-Rank Parameter Adaptation)</option>
+              <option value="qedit">Q-Edit (Quantized Low-Bit Adapter Editing)</option>
             </select>
           </div>
 
@@ -101,6 +102,7 @@
           <button class="tab-btn" data-tab="tab-continual">🔄 Continual Matrix</button>
           <button class="tab-btn" data-tab="tab-safety">🛡️ Safety Unlearning</button>
           <button class="tab-btn" data-tab="tab-multihop">🔗 Multi-Hop &amp; Audit</button>
+          <button class="tab-btn" data-tab="tab-factuality">🎯 Factuality &amp; Resolution</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -165,6 +167,19 @@
           </div>
 
           <div id="multihop-results" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Tab 7: Factuality & Knowledge Conflict Resolution -->
+        <div class="tab-pane" id="tab-factuality">
+          <h3>🎯 Semantic Entropy &amp; Knowledge Conflict Resolver</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Sample stochastic model completions to compute Semantic Entropy, evaluate hallucination risk, and resolve contradictory knowledge edits.</p>
+          
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+            <button type="button" id="btn-run-factcheck" class="btn btn-secondary">🎲 Check Semantic Entropy</button>
+            <button type="button" id="btn-run-resolve" class="btn btn-accent">⚖️ Resolve Knowledge Conflict</button>
+          </div>
+
+          <div id="factuality-results" style="margin-top:12px;"></div>
         </div>
       </section>
     </main>

@@ -365,4 +365,79 @@ document.addEventListener("DOMContentLoaded", () => {
       resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error executing rollback: ${err.message}</p>`;
     }
   });
+
+  // Factcheck Button
+  document.getElementById("btn-run-factcheck").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const target = document.getElementById("target-input").value;
+    const resultsContainer = document.getElementById("factuality-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Sampling stochastic generations (T=0.7) and clustering semantic equivalences...</p>`;
+
+    try {
+      const res = await fetch("/api/factuality", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, target_new: target, num_samples: 5, temperature: 0.7 })
+      });
+      const data = await res.json();
+
+      let clusterRows = data.clusters.map((c, i) => `
+        <div style="background:#1e1e2e; padding:8px 12px; margin-bottom:6px; border-radius:6px;">
+          <div style="font-size:12px; font-weight:600; color:#cdd6f4;">Cluster ${i+1}: <code>"${c.canonical}"</code></div>
+          <div style="font-size:11px; color:#a6adc8;">Frequency: ${c.frequency}/${data.num_samples} (Probability: ${(c.probability * 100).toFixed(0)}%)</div>
+        </div>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🎯 Semantic Entropy Assessment</h4>
+          <p><strong>Prompt:</strong> "${data.prompt}" &rarr; <strong>Target:</strong> "${data.target_new}"</p>
+          <p><strong>Semantic Entropy:</strong> ${data.semantic_entropy.toFixed(4)} &bull; <strong>Hallucination Risk:</strong> ${(data.hallucination_risk_score * 100).toFixed(1)}%</p>
+          <p><strong>Target Adherence:</strong> ${(data.target_adherence_rate * 100).toFixed(1)}% &bull; <strong>Stability:</strong> ${data.is_confidently_stable ? '✅ Confidently Stable' : '⚠️ High Uncertainty'}</p>
+          <hr style="border-color:#45475a; margin:10px 0;">
+          <h5 style="margin-bottom:8px;">Semantic Generation Clusters:</h5>
+          ${clusterRows}
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error computing factuality: ${err.message}</p>`;
+    }
+  });
+
+  // Resolve Conflict Button
+  document.getElementById("btn-run-resolve").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const subject = document.getElementById("subject-input").value;
+    const target = document.getElementById("target-input").value;
+    const resultsContainer = document.getElementById("factuality-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Evaluating conflict resolution strategy across knowledge graph...</p>`;
+
+    try {
+      const res = await fetch("/api/resolve-conflict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          subject,
+          relation: "associated with",
+          target_new: target,
+          strategy: "latest_wins",
+          valid_from: "2024"
+        })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>⚖️ Automated Conflict Resolution</h4>
+          <p><strong>Action:</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.action}</span> &bull; <strong>Strategy:</strong> <code>${data.strategy_applied}</code></p>
+          <p><strong>Effective Target:</strong> <code>"${data.effective_target}"</code></p>
+          <p><strong>Reason:</strong> ${data.reason}</p>
+          ${data.audit_notes.length ? `<p style="font-size:12px; color:#f9e2af;"><strong>Notes:</strong> ${data.audit_notes.join('; ')}</p>` : ''}
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error resolving conflict: ${err.message}</p>`;
+    }
+  });
 });
