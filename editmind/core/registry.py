@@ -50,10 +50,12 @@ class EditorRegistry:
         return sorted(list(cls._editors.keys()))
 
     @classmethod
-    def create(cls, name: str, model_wrapper: any, config: dict = None) -> BaseKnowledgeEditor:
+    def create(cls, name: str, model_wrapper: any, config: dict = None, **kwargs) -> BaseKnowledgeEditor:
         """Instantiates an editor with given model wrapper and config."""
         editor_cls = cls.get(name)
-        return editor_cls(model_wrapper=model_wrapper, config=config or {})
+        cfg = dict(config or {})
+        cfg.update(kwargs)
+        return editor_cls(model_wrapper=model_wrapper, config=cfg, **kwargs)
 
 
 register_editor = EditorRegistry.register

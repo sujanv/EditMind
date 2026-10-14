@@ -197,6 +197,10 @@ class BaseModelWrapper(ABC):
     def get_module(self, path: str) -> nn.Module:
         pass
 
+    def get_layer(self, layer_idx: int) -> nn.Module:
+        """Retrieves transformer block at index."""
+        pass
+
     @abstractmethod
     def get_state_dict(self) -> Dict[str, torch.Tensor]:
         pass
@@ -266,6 +270,14 @@ class UnifiedModelWrapper(BaseModelWrapper):
             else:
                 curr = getattr(curr, part)
         return curr
+
+    def get_layer(self, layer_idx: int) -> nn.Module:
+        """Retrieves transformer block at index."""
+        if hasattr(self.model, "layers"):
+            return self.model.layers[layer_idx]
+        if hasattr(self.model, "transformer") and hasattr(self.model.transformer, "h"):
+            return self.model.transformer.h[layer_idx]
+        return self.get_module(f"layers.{layer_idx}")
 
     def get_state_dict(self) -> Dict[str, torch.Tensor]:
         return {k: v.detach().clone() for k, v in self.model.state_dict().items()}

@@ -6,6 +6,7 @@ from editmind.editors.ike import IKEEditor
 from editmind.editors.ft import FTLEditor, LoRAEditor
 from editmind.editors.pmet import PMETEditor
 from editmind.editors.alphaedit import AlphaEditEditor
+from editmind.editors.qedit import QuantizedKnowledgeEditor
 
 __all__ = [
     "ROMEEditor",
@@ -17,4 +18,5 @@ __all__ = [
     "LoRAEditor",
     "PMETEditor",
     "AlphaEditEditor",
+    "QuantizedKnowledgeEditor",
 ]
