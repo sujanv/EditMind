@@ -13,6 +13,11 @@ from editmind.evaluation.multihop import (
     MultiHopEvaluator,
     create_sample_multihop_chains,
 )
+from editmind.evaluation.factuality import (
+    SemanticEntropyEvaluator,
+    FactualityReport,
+    SemanticCluster,
+)
 
 __all__ = [
     "compute_efficacy_score",
@@ -26,4 +31,7 @@ __all__ = [
     "MultiHopResult",
     "MultiHopEvaluator",
     "create_sample_multihop_chains",
+    "SemanticEntropyEvaluator",
+    "FactualityReport",
+    "SemanticCluster",
 ]
