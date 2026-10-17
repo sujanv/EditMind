@@ -1,5 +1,11 @@
 from editmind.safety.conflict_detector import KnowledgeConflictDetector, ConflictReport
-from editmind.safety.unlearning import MachineUnlearner, UnlearnResult
+from editmind.safety.unlearning import (
+    MachineUnlearner,
+    UnlearnResult,
+    ConceptEraser,
+    OrthogonalGradientUnlearner,
+    ConceptUnlearnReport,
+)
 from editmind.safety.auditor import KnowledgeDriftAuditor, AuditReport
 from editmind.safety.resolver import (
     KnowledgeConflictResolver,
@@ -13,6 +19,9 @@ __all__ = [
     "ConflictReport",
     "MachineUnlearner",
     "UnlearnResult",
+    "ConceptEraser",
+    "OrthogonalGradientUnlearner",
+    "ConceptUnlearnReport",
     "KnowledgeDriftAuditor",
     "AuditReport",
     "KnowledgeConflictResolver",
