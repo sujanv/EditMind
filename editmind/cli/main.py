@@ -22,6 +22,8 @@ from editmind.safety import (
 )
 from editmind.evaluation.multihop import MultiHopEvaluator, create_sample_multihop_chains
 from editmind.evaluation.factuality import SemanticEntropyEvaluator
+from editmind.models.localization import ConsensusLayerRanker
+from editmind.safety.unlearning import ConceptEraser
 
 
 def main():
@@ -81,6 +83,17 @@ def main():
     resolve_parser.add_argument("--strategy", type=str, default="latest_wins", choices=["latest_wins", "confidence_weighted", "temporal_scoping", "merge_multi_valued", "reject_on_conflict"])
     resolve_parser.add_argument("--confidence", type=float, default=1.0)
     resolve_parser.add_argument("--valid-from", type=str, default=None)
+
+    # Command: localize
+    localize_parser = subparsers.add_parser("localize", help="Run consensus layer & token attribution (Integrated Gradients + Fisher)")
+    localize_parser.add_argument("--prompt", type=str, required=True)
+    localize_parser.add_argument("--subject", type=str, required=True)
+    localize_parser.add_argument("--target", type=str, required=True)
+    localize_parser.add_argument("--top-k", type=int, default=2)
+
+    # Command: erase-concept
+    erase_parser = subparsers.add_parser("erase-concept", help="Linear concept erasure and representation scrubbing")
+    erase_parser.add_argument("--concept", type=str, default="pii")
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
@@ -209,6 +222,53 @@ def main():
         print(f"Reason               : {decision.reason}")
         if decision.audit_notes:
             print(f"Audit Notes          : {'; '.join(decision.audit_notes)}")
+
+    elif args.command == "localize":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        ranker = ConsensusLayerRanker(wrapper)
+        report = ranker.locate_knowledge(
+            prompt=args.prompt,
+            subject=args.subject,
+            target=args.target,
+            top_k=args.top_k,
+        )
+        print(f"\n[EditMind] Consensus Layer Localization Report:")
+        print(f"Prompt               : {report.prompt}")
+        print(f"Subject              : {report.subject}")
+        print(f"Target               : {report.target}")
+        print(f"Recommended Layer(s) : {report.recommended_layers}")
+        print(f"Attribution Conf     : {report.confidence * 100:.1f}%")
+        print(f"Critical Token       : '{report.critical_token}'")
+        print("-" * 55)
+        print("Layer | Causal | Fisher Sens | Grad Energy | Consensus")
+        for s in report.layer_scores:
+            print(f"  {s.layer_idx:2d}  | {s.causal_score:.4f} |   {s.fisher_score:.6f}  |   {s.gradient_energy:.4f}  |   {s.consensus_score:.4f}")
+
+    elif args.command == "erase-concept":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        eraser = ConceptEraser(wrapper)
+        forget = [
+            "The secret passcode of Alice is",
+            "The classified encryption key of Alice is",
+            "Alice confidential credentials were",
+        ]
+        retain = [
+            "The capital of France is Paris",
+            "Shakespeare was a famous English writer",
+            "Berlin is the capital of Germany",
+        ]
+        report = eraser.erase_concept(
+            concept_name=args.concept,
+            forget_prompts=forget,
+            retain_prompts=retain,
+        )
+        print(f"\n[EditMind] Concept Erasure & Representation Scrubbing Report:")
+        print(f"Concept Name         : {report.concept_name}")
+        print(f"Scrubbed Layers      : {report.scrubbed_layers}")
+        print(f"Pre-Leakage Acc      : {report.pre_leakage_score * 100:.1f}%")
+        print(f"Post-Leakage Acc     : {report.post_leakage_score * 100:.1f}% (target: ~50% chance)")
+        print(f"Utility Retention    : {report.utility_retention_score * 100:.1f}%")
+        print(f"Completeness Score   : {report.unlearning_completeness * 100:.1f}%")
 
     elif args.command == "benchmark":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)

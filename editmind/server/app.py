@@ -32,6 +32,8 @@ from editmind.safety import (
     KnowledgeConflictResolver,
     ResolutionStrategy,
 )
+from editmind.models.localization import ConsensusLayerRanker
+from editmind.safety.unlearning import ConceptEraser
 from editmind.evaluation.factuality import SemanticEntropyEvaluator, FactualityReport
 from editmind.server.schemas import (
     EditApiRequest,
@@ -42,6 +44,8 @@ from editmind.server.schemas import (
     RollbackApiRequest,
     FactualityApiRequest,
     ResolveConflictApiRequest,
+    LocalizeRequest,
+    ConceptUnlearnRequest,
 )
 
 app = FastAPI(
@@ -399,6 +403,32 @@ def resolve_knowledge_conflict(req: ResolveConflictApiRequest):
         },
         "audit_notes": decision.audit_notes,
     }
+
+
+@app.post("/api/localize")
+def perform_consensus_localization(req: LocalizeRequest):
+    wrapper = get_model_wrapper()
+    ranker = ConsensusLayerRanker(wrapper)
+    report = ranker.locate_knowledge(
+        prompt=req.prompt,
+        subject=req.subject,
+        target=req.target,
+        top_k=req.top_k,
+    )
+    return report.to_dict()
+
+
+@app.post("/api/concept-unlearn")
+def perform_concept_erasure(req: ConceptUnlearnRequest):
+    wrapper = get_model_wrapper()
+    eraser = ConceptEraser(wrapper)
+    report = eraser.erase_concept(
+        concept_name=req.concept_name,
+        forget_prompts=req.forget_prompts,
+        retain_prompts=req.retain_prompts,
+        target_layers=req.target_layers,
+    )
+    return report.to_dict()
 
 
 dashboard_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "dashboard")

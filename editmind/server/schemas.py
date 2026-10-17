@@ -65,3 +65,17 @@ class ResolveConflictApiRequest(BaseModel):
     valid_from: Optional[str] = Field(None, json_schema_extra={"example": "2023"})
     valid_to: Optional[str] = Field(None)
     confidence: float = Field(1.0, json_schema_extra={"example": 1.0})
+
+
+class LocalizeRequest(BaseModel):
+    prompt: str = Field(..., json_schema_extra={"example": "The capital of France is"})
+    subject: str = Field(..., json_schema_extra={"example": "France"})
+    target: str = Field(..., json_schema_extra={"example": "Paris"})
+    top_k: int = Field(2, json_schema_extra={"example": 2})
+
+
+class ConceptUnlearnRequest(BaseModel):
+    concept_name: str = Field(..., json_schema_extra={"example": "confidential_credentials"})
+    forget_prompts: List[str] = Field(..., json_schema_extra={"example": ["The secret key of Alice is", "Alice confidential token was"]})
+    retain_prompts: List[str] = Field(..., json_schema_extra={"example": ["The capital of France is Paris", "Shakespeare was an English writer"]})
+    target_layers: Optional[List[int]] = Field(None, json_schema_extra={"example": [2, 3]})

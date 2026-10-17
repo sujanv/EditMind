@@ -181,3 +181,41 @@ def test_resolve_conflict_endpoint():
     assert data["action"] in ("ACCEPTED", "SUPERSEDED", "TEMPORAL_SPLIT", "MERGED")
     assert data["effective_target"] == "Inter Miami"
     assert "resolved_fact" in data
+
+
+def test_localize_endpoint():
+    res = client.post("/api/localize", json={
+        "prompt": "The capital of France is",
+        "subject": "France",
+        "target": "Paris",
+        "top_k": 2,
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "recommended_layers" in data
+    assert len(data["recommended_layers"]) == 2
+    assert "confidence" in data
+    assert "critical_token" in data
+    assert len(data["layer_scores"]) > 0
+
+
+def test_concept_unlearn_endpoint():
+    res = client.post("/api/concept-unlearn", json={
+        "concept_name": "confidential_credentials",
+        "forget_prompts": [
+            "The secret key of Alice is",
+            "Alice confidential token was",
+        ],
+        "retain_prompts": [
+            "The capital of France is Paris",
+            "Shakespeare was an English writer",
+        ],
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["concept_name"] == "confidential_credentials"
+    assert "pre_leakage_score" in data
+    assert "post_leakage_score" in data
+    assert "utility_retention_score" in data
+    assert "unlearning_completeness" in data
+
