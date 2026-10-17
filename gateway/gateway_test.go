@@ -198,3 +198,109 @@ func TestLatencyPercentiles(t *testing.T) {
 		t.Fatalf("Expected p99 >= 9.0, got %f", p99)
 	}
 }
+
+func TestBloomFilterFastNegativeBypass(t *testing.T) {
+	bf := NewBloomFilter(4096, 4)
+	bf.Add("eiffel")
+	bf.Add("tower")
+	bf.Add("paris")
+
+	if !bf.MayContain("eiffel") {
+		t.Fatalf("Expected bloom filter to contain 'eiffel'")
+	}
+	if !bf.MayContain("tower") {
+		t.Fatalf("Expected bloom filter to contain 'tower'")
+	}
+	if bf.MayContain("randomnonexistentkeyword12345") {
+		t.Fatalf("Expected bloom filter to return false for non-existent keyword")
+	}
+
+	if !bf.MayContainAnyWord("The Eiffel Tower is beautiful") {
+		t.Fatalf("Expected MayContainAnyWord to find match for prompt")
+	}
+	if bf.MayContainAnyWord("quantum mechanics in deep space") {
+		t.Fatalf("Expected MayContainAnyWord to return false for unrelated query")
+	}
+
+	// Test Gateway Query Bloom Bypass
+	server := NewGatewayServer()
+	edit := KnowledgeEdit{
+		Subject: "Eiffel Tower",
+		Target:  "Rome",
+		Editor:  "rome",
+	}
+	body, _ := json.Marshal(edit)
+	server.HandleRegisterEdit(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/gateway/edit", bytes.NewBuffer(body)))
+
+	// Unrelated query should be bypassed by bloom filter
+	unrelatedReq := QueryRequest{Prompt: "quantum mechanics in deep space"}
+	unrelatedBody, _ := json.Marshal(unrelatedReq)
+	rec := httptest.NewRecorder()
+	server.HandleQuery(rec, httptest.NewRequest(http.MethodPost, "/api/gateway/query", bytes.NewBuffer(unrelatedBody)))
+
+	var qResp QueryResponse
+	json.NewDecoder(rec.Body).Decode(&qResp)
+	if qResp.Intercepted {
+		t.Fatalf("Unrelated query should not be intercepted")
+	}
+
+	server.mu.RLock()
+	bypassCount := server.bloomBypassCount
+	server.mu.RUnlock()
+	if bypassCount != 1 {
+		t.Fatalf("Expected bloom bypass count to be 1, got %d", bypassCount)
+	}
+}
+
+func TestClusterPeerJoinAndSync(t *testing.T) {
+	server := NewGatewayServer()
+
+	// 1. Join peer
+	peer := ClusterPeer{
+		NodeID:  "node-peer-1",
+		Address: "http://10.0.0.2:8080",
+	}
+	pBody, _ := json.Marshal(peer)
+	rec := httptest.NewRecorder()
+	server.HandleClusterJoin(rec, httptest.NewRequest(http.MethodPost, "/api/gateway/cluster/join", bytes.NewBuffer(pBody)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK on cluster join, got %d", rec.Code)
+	}
+
+	// 2. Query peers
+	recPeers := httptest.NewRecorder()
+	server.HandleClusterPeers(recPeers, httptest.NewRequest(http.MethodGet, "/api/gateway/cluster/peers", nil))
+	var peersResp struct {
+		PeersCount int           `json:"peers_count"`
+		Peers      []ClusterPeer `json:"peers"`
+	}
+	json.NewDecoder(recPeers.Body).Decode(&peersResp)
+	if peersResp.PeersCount != 1 {
+		t.Fatalf("Expected 1 peer, got %d", peersResp.PeersCount)
+	}
+
+	// 3. Cluster sync an edit
+	syncEdit := KnowledgeEdit{
+		Subject: "Colosseum",
+		Target:  "Paris",
+		Editor:  "rome",
+	}
+	syncPayload := map[string]interface{}{
+		"sender_id": "node-peer-1",
+		"edit":      syncEdit,
+	}
+	sBody, _ := json.Marshal(syncPayload)
+	recSync := httptest.NewRecorder()
+	server.HandleClusterSync(recSync, httptest.NewRequest(http.MethodPost, "/api/gateway/cluster/sync", bytes.NewBuffer(sBody)))
+	if recSync.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK on cluster sync, got %d", recSync.Code)
+	}
+
+	server.mu.RLock()
+	_, exists := server.edits["colosseum"]
+	server.mu.RUnlock()
+	if !exists {
+		t.Fatalf("Expected synced edit 'colosseum' to exist in gateway edits")
+	}
+}
+

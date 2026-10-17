@@ -1,5 +1,6 @@
 // EditMind High-Performance Knowledge Gateway & Audit Service
-// Features: Vector Similarity Cache, Token-Bucket Rate Limiter, Prometheus Metrics, & Audit Trail.
+// Features: Vector Similarity Cache, Token-Bucket Rate Limiter, Bloom Filter Fast-Negative Bypass,
+// Write-Ahead Log (WAL), Latency Percentiles, Distributed Peer Replication, & Prometheus Metrics.
 
 package main
 
@@ -76,19 +77,101 @@ func (tb *TokenBucket) Allow() bool {
 	return false
 }
 
+// BloomFilter provides sub-microsecond negative existence checks on edited facts.
+type BloomFilter struct {
+	bits []uint64
+	size uint64
+	k    int
+	mu   sync.RWMutex
+}
+
+func NewBloomFilter(sizeBits uint64, k int) *BloomFilter {
+	if sizeBits == 0 {
+		sizeBits = 8192
+	}
+	if k <= 0 {
+		k = 4
+	}
+	words := (sizeBits + 63) / 64
+	return &BloomFilter{
+		bits: make([]uint64, words),
+		size: words * 64,
+		k:    k,
+	}
+}
+
+func (bf *BloomFilter) hash(s string, seed int) uint64 {
+	var h uint64 = 14695981039346656037 ^ (uint64(seed) * 1099511628211)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= 1099511628211
+	}
+	return h % bf.size
+}
+
+func (bf *BloomFilter) Add(item string) {
+	bf.mu.Lock()
+	defer bf.mu.Unlock()
+	clean := strings.ToLower(strings.TrimSpace(item))
+	if clean == "" {
+		return
+	}
+	for i := 0; i < bf.k; i++ {
+		idx := bf.hash(clean, i)
+		bf.bits[idx/64] |= (1 << (idx % 64))
+	}
+}
+
+func (bf *BloomFilter) MayContain(item string) bool {
+	bf.mu.RLock()
+	defer bf.mu.RUnlock()
+	clean := strings.ToLower(strings.TrimSpace(item))
+	if clean == "" {
+		return false
+	}
+	for i := 0; i < bf.k; i++ {
+		idx := bf.hash(clean, i)
+		if (bf.bits[idx/64] & (1 << (idx % 64))) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (bf *BloomFilter) MayContainAnyWord(prompt string) bool {
+	words := strings.Fields(strings.ToLower(prompt))
+	for _, w := range words {
+		clean := strings.Trim(w, ".,;:?!'\"()[]{}")
+		if len(clean) >= 2 && bf.MayContain(clean) {
+			return true
+		}
+	}
+	return false
+}
+
+type ClusterPeer struct {
+	NodeID   string    `json:"node_id"`
+	Address  string    `json:"address"`
+	JoinedAt time.Time `json:"joined_at"`
+}
+
 type GatewayServer struct {
 	mu          sync.RWMutex
+	nodeID      string
 	edits       map[string]KnowledgeEdit
 	auditLogs   []KnowledgeEdit
 	rateLimiter *TokenBucket
 	walPath     string
 	walMu       sync.Mutex
+	bloom       *BloomFilter
+	peers       map[string]*ClusterPeer
 
 	// Metrics and latency counters
-	totalRequests     int64
-	interceptedCount  int64
-	rateLimitedCount  int64
-	latencies         []float64
+	totalRequests    int64
+	interceptedCount int64
+	rateLimitedCount int64
+	bloomBypassCount int64
+	latencies        []float64
 }
 
 func NewGatewayServer(walPath ...string) *GatewayServer {
@@ -97,10 +180,13 @@ func NewGatewayServer(walPath ...string) *GatewayServer {
 		path = walPath[0]
 	}
 	s := &GatewayServer{
+		nodeID:      fmt.Sprintf("node-%d", time.Now().UnixNano()%10000),
 		edits:       make(map[string]KnowledgeEdit),
 		auditLogs:   make([]KnowledgeEdit, 0),
 		rateLimiter: NewTokenBucket(100.0, 50.0), // 100 capacity, 50 req/sec refill
 		walPath:     path,
+		bloom:       NewBloomFilter(16384, 4),
+		peers:       make(map[string]*ClusterPeer),
 		latencies:   make([]float64, 0, 1000),
 	}
 	if path != "" {
@@ -130,8 +216,10 @@ func (s *GatewayServer) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":      "ok",
 		"service":     "EditMind Go Gateway",
-		"version":     "0.2.0",
+		"version":     "0.3.0",
+		"node_id":     s.nodeID,
 		"total_edits": len(s.edits),
+		"peers_count": len(s.peers),
 	})
 }
 
@@ -147,6 +235,10 @@ func (s *GatewayServer) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP editmind_gateway_intercepted_total Total queries intercepted by fast-path cache.\n")
 	fmt.Fprintf(w, "# TYPE editmind_gateway_intercepted_total counter\n")
 	fmt.Fprintf(w, "editmind_gateway_intercepted_total %d\n", s.interceptedCount)
+
+	fmt.Fprintf(w, "# HELP editmind_gateway_bloom_bypasses Total negative queries bypassed instantly by Bloom Filter.\n")
+	fmt.Fprintf(w, "# TYPE editmind_gateway_bloom_bypasses counter\n")
+	fmt.Fprintf(w, "editmind_gateway_bloom_bypasses %d\n", s.bloomBypassCount)
 
 	fmt.Fprintf(w, "# HELP editmind_gateway_active_edits Number of active knowledge edits in memory.\n")
 	fmt.Fprintf(w, "# TYPE editmind_gateway_active_edits gauge\n")
@@ -165,13 +257,22 @@ func (s *GatewayServer) HandleRegisterEdit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	edit.Timestamp = time.Now()
+	if edit.Timestamp.IsZero() {
+		edit.Timestamp = time.Now()
+	}
 	key := strings.ToLower(strings.TrimSpace(edit.Subject))
 
 	s.mu.Lock()
 	s.edits[key] = edit
 	s.auditLogs = append(s.auditLogs, edit)
 	s.mu.Unlock()
+
+	// Update bloom filter with subject and its words
+	s.bloom.Add(key)
+	for _, word := range strings.Fields(key) {
+		s.bloom.Add(word)
+	}
+
 	_ = s.AppendWAL(edit)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -208,6 +309,26 @@ func (s *GatewayServer) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	lowerPrompt := strings.ToLower(req.Prompt)
+
+	// Bloom Filter Fast-Negative Check:
+	// If no embedding is supplied and prompt words are not in Bloom filter, immediately return!
+	if len(req.Embedding) == 0 && !s.bloom.MayContainAnyWord(lowerPrompt) {
+		s.mu.Lock()
+		s.bloomBypassCount++
+		s.mu.Unlock()
+
+		resp := QueryResponse{
+			Prompt:       req.Prompt,
+			Predicted:    "unknown",
+			Intercepted:  false,
+			Similarity:   0.0,
+			ResponseTime: time.Since(start).String(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -389,6 +510,10 @@ func (s *GatewayServer) ReplayWAL() error {
 			key := strings.ToLower(strings.TrimSpace(edit.Subject))
 			s.edits[key] = edit
 			s.auditLogs = append(s.auditLogs, edit)
+			s.bloom.Add(key)
+			for _, w := range strings.Fields(key) {
+				s.bloom.Add(w)
+			}
 		}
 	}
 	return scanner.Err()
@@ -419,13 +544,16 @@ func (s *GatewayServer) HandleStats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":            s.nodeID,
 		"total_requests":     s.totalRequests,
 		"intercepted_count":  s.interceptedCount,
 		"rate_limited_count": s.rateLimitedCount,
+		"bloom_bypass_count": s.bloomBypassCount,
 		"active_edits_count": len(s.edits),
 		"latency_p50_ms":     p50,
 		"latency_p90_ms":     p90,
 		"latency_p99_ms":     p99,
+		"cluster_peers":      len(s.peers),
 	})
 }
 
@@ -462,6 +590,10 @@ func (s *GatewayServer) HandleSnapshotImport(w http.ResponseWriter, r *http.Requ
 
 	for k, v := range payload.Edits {
 		s.edits[k] = v
+		s.bloom.Add(k)
+		for _, w := range strings.Fields(k) {
+			s.bloom.Add(w)
+		}
 		_ = s.AppendWAL(v)
 	}
 	s.auditLogs = append(s.auditLogs, payload.AuditTrail...)
@@ -471,6 +603,90 @@ func (s *GatewayServer) HandleSnapshotImport(w http.ResponseWriter, r *http.Requ
 		"status":         "imported",
 		"imported_edits": len(payload.Edits),
 		"total_edits":    len(s.edits),
+	})
+}
+
+// HandleClusterJoin allows external gateway instances to join the cluster.
+func (s *GatewayServer) HandleClusterJoin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var peer ClusterPeer
+	if err := json.NewDecoder(r.Body).Decode(&peer); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if peer.NodeID == "" || peer.Address == "" {
+		http.Error(w, "Missing node_id or address", http.StatusBadRequest)
+		return
+	}
+	peer.JoinedAt = time.Now()
+
+	s.mu.Lock()
+	s.peers[peer.NodeID] = &peer
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "joined",
+		"node_id":     s.nodeID,
+		"total_peers": len(s.peers),
+	})
+}
+
+// HandleClusterPeers returns all known cluster peers.
+func (s *GatewayServer) HandleClusterPeers(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	peerList := make([]ClusterPeer, 0, len(s.peers))
+	for _, p := range s.peers {
+		peerList = append(peerList, *p)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":     s.nodeID,
+		"peers_count": len(peerList),
+		"peers":       peerList,
+	})
+}
+
+// HandleClusterSync ingests a replicated edit from another node in the cluster.
+func (s *GatewayServer) HandleClusterSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var syncPayload struct {
+		SenderID string        `json:"sender_id"`
+		Edit     KnowledgeEdit `json:"edit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&syncPayload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	key := strings.ToLower(strings.TrimSpace(syncPayload.Edit.Subject))
+	s.mu.Lock()
+	s.edits[key] = syncPayload.Edit
+	s.auditLogs = append(s.auditLogs, syncPayload.Edit)
+	s.mu.Unlock()
+
+	s.bloom.Add(key)
+	for _, w := range strings.Fields(key) {
+		s.bloom.Add(w)
+	}
+	_ = s.AppendWAL(syncPayload.Edit)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "synchronized",
+		"subject":     syncPayload.Edit.Subject,
+		"total_edits": len(s.edits),
 	})
 }
 
@@ -486,9 +702,12 @@ func main() {
 	http.HandleFunc("/api/gateway/stats", server.HandleStats)
 	http.HandleFunc("/api/gateway/snapshot/export", server.HandleSnapshotExport)
 	http.HandleFunc("/api/gateway/snapshot/import", server.HandleSnapshotImport)
+	http.HandleFunc("/api/gateway/cluster/join", server.HandleClusterJoin)
+	http.HandleFunc("/api/gateway/cluster/peers", server.HandleClusterPeers)
+	http.HandleFunc("/api/gateway/cluster/sync", server.HandleClusterSync)
 
 	port := ":8080"
-	log.Printf("[EditMind] Enhanced Gateway microservice running on http://localhost%s\n", port)
+	log.Printf("[EditMind] Enhanced Gateway microservice running on http://localhost%s (Node: %s)\n", port, server.nodeID)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
