@@ -30,7 +30,8 @@ As Large Language Models (LLMs) scale, retraining or full fine-tuning to update 
 5. **Explicit Memory & Codebooks**: **GRACE** (Dynamic Epsilon-Ball Activation Memory, 100% Locality)
 6. **Non-Parametric In-Context Retrieval**: **IKE** (Dynamic Demonstration Retrieval)
 7. **Quantized Low-Bit Editing**: **Q-Edit** (Simulated 4-bit/8-bit Quantized Weight Adaptation with Residual Low-Rank Adapters)
-8. **Constrained Baselines**: **FT-L** ($L_\infty$-bounded Fine-Tuning) and **LoRA-Edit** (Low-Rank Parameter Adaptation)
+8. **Knowledge Mixture-of-Experts**: **K-MoE** (Dynamic Gated Adapter Routing for Lifelong Zero-Interference Editing)
+9. **Constrained Baselines**: **FT-L** ($L_\infty$-bounded Fine-Tuning) and **LoRA-Edit** (Low-Rank Parameter Adaptation)
 
 ---
 
@@ -46,6 +47,7 @@ As Large Language Models (LLMs) scale, retraining or full fine-tuning to update 
 | **Activation Cache**| **GRACE** | None ($\Delta W = 0$) | **100% Guaranteed** | Thousands | Dynamic $\epsilon$-ball codebook intercepting layer activations |
 | **Non-Parametric** | **IKE** | None ($\Delta W = 0$) | High | Context-bound | Few-shot analogy & copy demonstration retriever |
 | **Quantized Low-Bit**| **Q-Edit** | Low-rank adapter ($B \times A$) | High | Medium | 4-bit/8-bit weight quantization freeze with trainable low-rank bypass |
+| **Dynamic Gating** | **K-MoE** | Expert Adapter ($B_i \times A_i$) | **Very High** | Tens of Thousands | Dynamic router gating $G(x)$ dispatching edits to domain-isolated expert adapters |
 | **Constrained FT** | **FT-L** | Gradient Descent | Low | Degrades | $L_\infty / L_2$ norm-bounded backpropagation |
 | **Parameter-Efficient**| **LoRA-Edit** | Low-rank adapter ($B \times A$) | Moderate | Medium | Target MLP LoRA adapter training with parameter merge |
 
@@ -307,9 +309,40 @@ editmind resolve --subject "Steve Jobs" --relation "CEO of" --target "Apple" --s
 
 ---
 
+## 🧬 Consensus Layer Localization Engine
+
+Finding which layer to edit without manual trial-and-error is solved via a three-way attribution consensus:
+- **Causal Mediation Tracing**: Average Indirect Effect (AIE) isolating factual recall sites.
+- **Empirical Fisher Information Sensitivity**: Layer parameter sensitivity $F^{(l)} = \frac{1}{\|W^{(l)}\|_0} \sum_{w} (\nabla_w \log P(y|x))^2$.
+- **Integrated Gradients**: Path-integral attribution identifying critical subject tokens.
+- **Consensus Ranker**: Computes normalized consensus layer score to recommend optimal editing layers.
+
+```bash
+# Run consensus localization via CLI
+editmind localize --prompt "The capital of France is" --subject "France" --target "Paris"
+```
+
+---
+
+## 🧹 Linear Concept Erasure (RLACE) & Representation Scrubbing
+
+Removes entire harmful or private concepts (PII, dangerous instructions, toxic personas) across model representations:
+- **Null-Space Projection (RLACE)**: Projects layer representations onto the orthogonal complement of the concept subspace: $P_{\perp} = I - \frac{v_{concept} v_{concept}^T}{\|v_{concept}\|^2}$.
+- **Linear Probe Auditor**: Measures concept leakage accuracy before and after erasure (driving probe accuracy down to chance 50%).
+- **Orthogonal Gradient Unlearning**: Ascends loss on forget samples while projecting parameter updates orthogonal to benign gradients to maintain zero degradation on utility.
+
+```bash
+# Scrub sensitive concept representations via CLI
+editmind erase-concept --concept "pii"
+```
+
+---
+
 ## ⚡ Go Microservice Gateway
 
 A high-performance Golang service located in [`gateway/`](gateway/):
+- **Bloom Filter Fast-Negative Bypass**: Sub-microsecond constant time ($O(1)$) negative filtering bypassing non-edited queries in < 5 microseconds.
+- **Distributed Peer Replication Protocol**: Synchronizes edits and multi-hop graph states across gateway cluster instances via gossip replication (`/api/gateway/cluster/join`, `/api/gateway/cluster/sync`).
 - **Sub-Millisecond Interception**: Resolves queries matching edited memory prior to executing heavy neural layers.
 - **Multi-Hop Traversal Graph**: Traverses chained relations ($A \to B \to C$) in memory in microseconds.
 - **Write-Ahead Log (WAL) & Crash Recovery**: Appends all edits to an append-only WAL (`gateway_wal.jsonl`) with instant startup replay.
@@ -333,12 +366,13 @@ go build -o editmind-gateway main.go
 
 Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 - **Causal Tracing**: SVG layer $\times$ token heatmap identifying factual memory locations.
-- **Probability Shift**: Side-by-side probability bars for target and ground truth across ROME, MEMIT, PMET, AlphaEdit, GRACE, IKE, and Q-Edit.
+- **Probability Shift**: Side-by-side probability bars for target and ground truth across ROME, MEMIT, PMET, AlphaEdit, GRACE, IKE, Q-Edit, and K-MoE.
 - **Comparative Radar**: 5-axis polygon visualizer comparing all paradigms.
 - **Continual Matrix**: Live $T \times T$ interference heatmap tracking sequential memory retention.
 - **Safety Sandbox**: Machine unlearning and knowledge contradiction testbed.
 - **Multi-Hop & Audit Panel**: Test logical ripple propagation, audit KL-divergence drift, and rollback edit patches.
 - **Factuality & Resolution Panel**: Stochastic semantic entropy evaluator and automated conflict resolution testbed.
+- **Consensus & Concept Panel**: Multi-criterion consensus layer localization and linear concept erasure (RLACE) auditor.
 
 ---
 
@@ -346,10 +380,10 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 
 Run the automated test suite across Python 3.10, 3.11, and 3.12:
 ```bash
-# Python Unit Tests (57 automated tests)
+# Python Unit Tests (67 automated tests)
 pytest tests/ -v
 
-# Go Gateway Tests (6 unit & benchmark suites)
+# Go Gateway Tests (8 unit & benchmark suites)
 cd gateway && go test -v ./...
 ```
 

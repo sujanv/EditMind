@@ -440,4 +440,97 @@ document.addEventListener("DOMContentLoaded", () => {
       resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error resolving conflict: ${err.message}</p>`;
     }
   });
+
+  // Consensus Localization Button
+  document.getElementById("btn-run-consensus").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const subject = document.getElementById("subject-input").value;
+    const target = document.getElementById("target-input").value;
+    const resultsContainer = document.getElementById("consensus-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Computing Integrated Gradients + Empirical Fisher Matrix Sensitivity + Causal Mediation...</p>`;
+
+    try {
+      const res = await fetch("/api/localize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, subject, target, top_k: 2 })
+      });
+      const data = await res.json();
+
+      let layerRows = data.layer_scores.map(s => `
+        <tr>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;"><strong>Layer ${s.layer_idx}</strong></td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${s.causal_score.toFixed(3)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${s.fisher_score.toFixed(6)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${s.gradient_energy.toFixed(3)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244; font-weight:bold; color:#a6e3a1;">${s.consensus_score.toFixed(3)}</td>
+        </tr>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🧬 Consensus Layer Attribution</h4>
+          <p><strong>Prompt:</strong> "${data.prompt}" &rarr; <strong>Target:</strong> "${data.target}"</p>
+          <p><strong>Recommended Layers:</strong> <span style="background:#a6e3a1; color:#11111b; padding:2px 8px; border-radius:4px; font-weight:bold;">${data.recommended_layers.map(l => 'Layer ' + l).join(', ')}</span> &bull; <strong>Confidence:</strong> ${(data.confidence * 100).toFixed(1)}%</p>
+          <p><strong>Critical Token:</strong> <code>"${data.critical_token}"</code></p>
+          <hr style="border-color:#45475a; margin:10px 0;">
+          <table style="width:100%; font-size:12px; border-collapse:collapse; text-align:left;">
+            <thead>
+              <tr style="color:#a6adc8; border-bottom:1px solid #45475a;">
+                <th style="padding:4px 8px;">Layer</th>
+                <th style="padding:4px 8px;">Causal Trace</th>
+                <th style="padding:4px 8px;">Fisher Sens</th>
+                <th style="padding:4px 8px;">Grad Energy</th>
+                <th style="padding:4px 8px;">Consensus</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${layerRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error computing consensus localization: ${err.message}</p>`;
+    }
+  });
+
+  // Concept Erasure Button
+  document.getElementById("btn-run-concept-erase").addEventListener("click", async () => {
+    const resultsContainer = document.getElementById("consensus-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Computing linear concept subspace null-projection (RLACE) and training linear probe auditor...</p>`;
+
+    try {
+      const res = await fetch("/api/concept-unlearn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          concept_name: "confidential_credentials",
+          forget_prompts: [
+            "The secret password of root is",
+            "The classified private key is",
+            "Root confidential authentication token was"
+          ],
+          retain_prompts: [
+            "The capital of France is Paris",
+            "Shakespeare was a famous English writer",
+            "Berlin is the capital of Germany"
+          ]
+        })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🧹 Linear Concept Erasure (RLACE) Report</h4>
+          <p><strong>Concept Name:</strong> <code>${data.concept_name}</code></p>
+          <p><strong>Scrubbed Layers:</strong> ${data.scrubbed_layers.map(l => 'Layer ' + l).join(', ')}</p>
+          <p><strong>Pre-Erasure Probe Leakage:</strong> ${(data.pre_leakage_score * 100).toFixed(1)}% &rarr; <strong>Post-Erasure Leakage:</strong> ${(data.post_leakage_score * 100).toFixed(1)}%</p>
+          <p><strong>Benign Utility Retention:</strong> ${(data.utility_retention_score * 100).toFixed(1)}% &bull; <strong>Completeness Score:</strong> ${(data.unlearning_completeness * 100).toFixed(1)}%</p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error executing concept erasure: ${err.message}</p>`;
+    }
+  });
 });

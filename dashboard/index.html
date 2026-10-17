@@ -50,6 +50,7 @@
               <option value="ft_l">FT-L (Constrained L-inf Fine-Tuning)</option>
               <option value="lora_edit">LoRA-Edit (Low-Rank Parameter Adaptation)</option>
               <option value="qedit">Q-Edit (Quantized Low-Bit Adapter Editing)</option>
+              <option value="kmoe">K-MoE (Knowledge Mixture of Experts)</option>
             </select>
           </div>
 
@@ -103,6 +104,7 @@
           <button class="tab-btn" data-tab="tab-safety">🛡️ Safety Unlearning</button>
           <button class="tab-btn" data-tab="tab-multihop">🔗 Multi-Hop &amp; Audit</button>
           <button class="tab-btn" data-tab="tab-factuality">🎯 Factuality &amp; Resolution</button>
+          <button class="tab-btn" data-tab="tab-consensus">🧬 Consensus &amp; Concept</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -180,6 +182,19 @@
           </div>
 
           <div id="factuality-results" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Tab 8: Consensus Localization & Linear Concept Erasure -->
+        <div class="tab-pane" id="tab-consensus">
+          <h3>🧬 Active Subspace Consensus &amp; Linear Concept Erasure</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Combine Integrated Gradients, Fisher Information sensitivity, and Causal Tracing to identify optimal editing layers, and scrub linear concept subspaces (RLACE) to permanently eliminate private or harmful representations.</p>
+          
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+            <button type="button" id="btn-run-consensus" class="btn btn-secondary">🧬 Run Consensus Localization</button>
+            <button type="button" id="btn-run-concept-erase" class="btn btn-accent">🧹 Scrub Linear Concept (RLACE)</button>
+          </div>
+
+          <div id="consensus-results" style="margin-top:12px;"></div>
         </div>
       </section>
     </main>
