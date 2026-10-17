@@ -10,6 +10,14 @@ from editmind.models.hooks import (
     hook_activation_intervention,
     hook_activation_replacement,
 )
+from editmind.models.localization import (
+    ConsensusLayerRanker,
+    FisherLayerRanker,
+    IntegratedGradientsAttributor,
+    ConsensusLocalizationReport,
+    LayerAttributionScore,
+    TokenAttributionResult,
+)
 
 __all__ = [
     "BaseModelWrapper",
@@ -21,4 +29,10 @@ __all__ = [
     "ActivationCacher",
     "hook_activation_intervention",
     "hook_activation_replacement",
+    "ConsensusLayerRanker",
+    "FisherLayerRanker",
+    "IntegratedGradientsAttributor",
+    "ConsensusLocalizationReport",
+    "LayerAttributionScore",
+    "TokenAttributionResult",
 ]
