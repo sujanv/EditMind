@@ -153,11 +153,17 @@ type ClusterPeer struct {
 	NodeID   string    `json:"node_id"`
 	Address  string    `json:"address"`
 	JoinedAt time.Time `json:"joined_at"`
+	LastSeen time.Time `json:"last_seen"`
+	Status   string    `json:"status"` // "active", "offline"
+	Role     string    `json:"role"`   // "leader", "follower"
 }
 
 type GatewayServer struct {
 	mu          sync.RWMutex
 	nodeID      string
+	leaderID    string
+	currentTerm uint64
+	isLeader    bool
 	edits       map[string]KnowledgeEdit
 	auditLogs   []KnowledgeEdit
 	rateLimiter *TokenBucket
@@ -181,6 +187,9 @@ func NewGatewayServer(walPath ...string) *GatewayServer {
 	}
 	s := &GatewayServer{
 		nodeID:      fmt.Sprintf("node-%d", time.Now().UnixNano()%10000),
+		leaderID:    "",
+		currentTerm: 1,
+		isLeader:    false,
 		edits:       make(map[string]KnowledgeEdit),
 		auditLogs:   make([]KnowledgeEdit, 0),
 		rateLimiter: NewTokenBucket(100.0, 50.0), // 100 capacity, 50 req/sec refill
@@ -623,6 +632,13 @@ func (s *GatewayServer) HandleClusterJoin(w http.ResponseWriter, r *http.Request
 		return
 	}
 	peer.JoinedAt = time.Now()
+	peer.LastSeen = time.Now()
+	if peer.Status == "" {
+		peer.Status = "active"
+	}
+	if peer.Role == "" {
+		peer.Role = "follower"
+	}
 
 	s.mu.Lock()
 	s.peers[peer.NodeID] = &peer
@@ -633,6 +649,128 @@ func (s *GatewayServer) HandleClusterJoin(w http.ResponseWriter, r *http.Request
 		"status":      "joined",
 		"node_id":     s.nodeID,
 		"total_peers": len(s.peers),
+	})
+}
+
+// HandleClusterHeartbeat updates a peer's heartbeat and returns leader and term status.
+func (s *GatewayServer) HandleClusterHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var hb struct {
+		NodeID string `json:"node_id"`
+		Term   uint64 `json:"term"`
+		Role   string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&hb); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	if peer, exists := s.peers[hb.NodeID]; exists {
+		peer.LastSeen = time.Now()
+		peer.Status = "active"
+		if hb.Role != "" {
+			peer.Role = hb.Role
+		}
+	}
+	s.mu.Unlock()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "acknowledged",
+		"node_id":   s.nodeID,
+		"term":      s.currentTerm,
+		"leader_id": s.leaderID,
+		"is_leader": s.isLeader,
+	})
+}
+
+// HandleClusterElect initiates leader election across the cluster.
+func (s *GatewayServer) HandleClusterElect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CandidateID string `json:"candidate_id"`
+		Term        uint64 `json:"term"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	granted := false
+	if req.Term > s.currentTerm || (req.Term == s.currentTerm && s.leaderID == "") {
+		s.currentTerm = req.Term
+		s.leaderID = req.CandidateID
+		s.isLeader = (req.CandidateID == s.nodeID)
+		granted = true
+	} else if req.CandidateID == s.nodeID {
+		s.currentTerm++
+		s.leaderID = s.nodeID
+		s.isLeader = true
+		granted = true
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"vote_granted": granted,
+		"current_term": s.currentTerm,
+		"leader_id":    s.leaderID,
+		"is_leader":    s.isLeader,
+	})
+}
+
+// PruneInactivePeers checks and updates status of stale peers.
+func (s *GatewayServer) PruneInactivePeers(timeout time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	pruned := 0
+	for _, p := range s.peers {
+		if now.Sub(p.LastSeen) > timeout && p.Status == "active" {
+			p.Status = "offline"
+			pruned++
+		}
+	}
+	return pruned
+}
+
+// HandleClusterState returns full distributed cluster topology, consensus state, and WAL watermark.
+func (s *GatewayServer) HandleClusterState(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	activePeers := 0
+	for _, p := range s.peers {
+		if p.Status == "active" {
+			activePeers++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":           s.nodeID,
+		"is_leader":         s.isLeader,
+		"leader_id":         s.leaderID,
+		"term":              s.currentTerm,
+		"total_edits":       len(s.edits),
+		"wal_commit_index":  len(s.auditLogs),
+		"active_peers":      activePeers,
+		"total_peers":       len(s.peers),
 	})
 }
 
@@ -705,6 +843,9 @@ func main() {
 	http.HandleFunc("/api/gateway/cluster/join", server.HandleClusterJoin)
 	http.HandleFunc("/api/gateway/cluster/peers", server.HandleClusterPeers)
 	http.HandleFunc("/api/gateway/cluster/sync", server.HandleClusterSync)
+	http.HandleFunc("/api/gateway/cluster/heartbeat", server.HandleClusterHeartbeat)
+	http.HandleFunc("/api/gateway/cluster/elect", server.HandleClusterElect)
+	http.HandleFunc("/api/gateway/cluster/state", server.HandleClusterState)
 
 	port := ":8080"
 	log.Printf("[EditMind] Enhanced Gateway microservice running on http://localhost%s (Node: %s)\n", port, server.nodeID)

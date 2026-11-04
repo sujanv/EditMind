@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestCosineSimilarity(t *testing.T) {
@@ -301,6 +302,102 @@ func TestClusterPeerJoinAndSync(t *testing.T) {
 	server.mu.RUnlock()
 	if !exists {
 		t.Fatalf("Expected synced edit 'colosseum' to exist in gateway edits")
+	}
+}
+
+func TestClusterHeartbeatAndPruning(t *testing.T) {
+	server := NewGatewayServer()
+
+	// 1. Join peer
+	peer := ClusterPeer{
+		NodeID:  "node-worker-9",
+		Address: "http://10.0.0.9:8080",
+	}
+	pBody, _ := json.Marshal(peer)
+	rec := httptest.NewRecorder()
+	server.HandleClusterJoin(rec, httptest.NewRequest(http.MethodPost, "/api/gateway/cluster/join", bytes.NewBuffer(pBody)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on join, got %d", rec.Code)
+	}
+
+	// 2. Send heartbeat
+	hbPayload := map[string]interface{}{
+		"node_id": "node-worker-9",
+		"term":    2,
+		"role":    "follower",
+	}
+	hbBody, _ := json.Marshal(hbPayload)
+	recHb := httptest.NewRecorder()
+	server.HandleClusterHeartbeat(recHb, httptest.NewRequest(http.MethodPost, "/api/gateway/cluster/heartbeat", bytes.NewBuffer(hbBody)))
+	if recHb.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on heartbeat, got %d", recHb.Code)
+	}
+
+	// 3. Test Pruning with small timeout
+	server.mu.Lock()
+	server.peers["node-worker-9"].LastSeen = time.Now().Add(-10 * time.Minute)
+	server.mu.Unlock()
+
+	pruned := server.PruneInactivePeers(5 * time.Minute)
+	if pruned != 1 {
+		t.Fatalf("Expected 1 pruned peer, got %d", pruned)
+	}
+
+	server.mu.RLock()
+	st := server.peers["node-worker-9"].Status
+	server.mu.RUnlock()
+	if st != "offline" {
+		t.Fatalf("Expected status offline, got %s", st)
+	}
+}
+
+func TestClusterLeaderElectionAndState(t *testing.T) {
+	server := NewGatewayServer()
+
+	// 1. Trigger election for Candidate Node-A
+	electPayload := map[string]interface{}{
+		"candidate_id": "node-alpha",
+		"term":         5,
+	}
+	eBody, _ := json.Marshal(electPayload)
+	recElect := httptest.NewRecorder()
+	server.HandleClusterElect(recElect, httptest.NewRequest(http.MethodPost, "/api/gateway/cluster/elect", bytes.NewBuffer(eBody)))
+	if recElect.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on elect, got %d", recElect.Code)
+	}
+
+	var electResp struct {
+		VoteGranted bool   `json:"vote_granted"`
+		CurrentTerm uint64 `json:"current_term"`
+		LeaderID    string `json:"leader_id"`
+	}
+	json.NewDecoder(recElect.Body).Decode(&electResp)
+	if !electResp.VoteGranted {
+		t.Fatalf("Expected vote granted to candidate")
+	}
+	if electResp.LeaderID != "node-alpha" {
+		t.Fatalf("Expected leader to be node-alpha, got %s", electResp.LeaderID)
+	}
+
+	// 2. Query cluster state
+	recState := httptest.NewRecorder()
+	server.HandleClusterState(recState, httptest.NewRequest(http.MethodGet, "/api/gateway/cluster/state", nil))
+	if recState.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on cluster state, got %d", recState.Code)
+	}
+
+	var stateResp struct {
+		NodeID         string `json:"node_id"`
+		LeaderID       string `json:"leader_id"`
+		Term           uint64 `json:"term"`
+		WALCommitIndex int    `json:"wal_commit_index"`
+	}
+	json.NewDecoder(recState.Body).Decode(&stateResp)
+	if stateResp.LeaderID != "node-alpha" {
+		t.Fatalf("Expected leader_id node-alpha, got %s", stateResp.LeaderID)
+	}
+	if stateResp.Term != 5 {
+		t.Fatalf("Expected term 5, got %d", stateResp.Term)
 	}
 }
 
