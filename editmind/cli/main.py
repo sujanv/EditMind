@@ -22,6 +22,7 @@ from editmind.safety import (
 )
 from editmind.evaluation.multihop import MultiHopEvaluator, create_sample_multihop_chains
 from editmind.evaluation.factuality import SemanticEntropyEvaluator
+from editmind.evaluation.reciprocal import FactualReciprocalAuditor
 from editmind.models.localization import ConsensusLayerRanker
 from editmind.safety.unlearning import ConceptEraser
 
@@ -94,6 +95,21 @@ def main():
     # Command: erase-concept
     erase_parser = subparsers.add_parser("erase-concept", help="Linear concept erasure and representation scrubbing")
     erase_parser.add_argument("--concept", type=str, default="pii")
+
+    # Command: reciprocal
+    recip_parser = subparsers.add_parser("reciprocal", help="Audit bidirectional factual consistency and Reversal Curse")
+    recip_parser.add_argument("--subject", type=str, required=True, help="Subject entity")
+    recip_parser.add_argument("--relation", type=str, required=True, help="Relation name")
+    recip_parser.add_argument("--target", type=str, required=True, help="Target value")
+    recip_parser.add_argument("--inverse-prompt", type=str, default=None, help="Optional custom inverse prompt")
+
+    # Command: steer
+    steer_parser = subparsers.add_parser("steer", help="Apply representation engineering activation steering vector")
+    steer_parser.add_argument("--prompt", type=str, required=True)
+    steer_parser.add_argument("--target", type=str, required=True)
+    steer_parser.add_argument("--ground-truth", type=str, default=None)
+    steer_parser.add_argument("--layer", type=int, default=2)
+    steer_parser.add_argument("--coeff", type=float, default=1.5)
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
@@ -269,6 +285,47 @@ def main():
         print(f"Post-Leakage Acc     : {report.post_leakage_score * 100:.1f}% (target: ~50% chance)")
         print(f"Utility Retention    : {report.utility_retention_score * 100:.1f}%")
         print(f"Completeness Score   : {report.unlearning_completeness * 100:.1f}%")
+
+    elif args.command == "reciprocal":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        auditor = FactualReciprocalAuditor(wrapper)
+        res = auditor.audit_edit_reciprocity(
+            subject=args.subject,
+            relation=args.relation,
+            target_new=args.target,
+            custom_inverse_prompt=args.inverse_prompt,
+        )
+        print(f"\n[EditMind] Factual Reciprocal Consistency Audit:")
+        print(f"Subject              : {res.subject}")
+        print(f"Relation             : {res.relation}")
+        print(f"Target               : {res.target}")
+        print(f"Forward Prompt       : '{res.forward_prompt}' -> '{res.forward_target}'")
+        print(f"Inverse Prompt       : '{res.inverse_prompt}' -> '{res.inverse_target}'")
+        print(f"Directional Asym Gap : {res.directional_asymmetry_gap:.4f}")
+        print(f"Reciprocal Score     : {res.reciprocal_consistency_score:.4f}")
+        print(f"Reversal Curse       : {'⚠️ DETECTED' if res.reversal_curse_detected else '✅ PASSED'}")
+        print(f"Summary              : {res.summary}")
+
+    elif args.command == "steer":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        editor = EditorRegistry.create(
+            "steer",
+            model_wrapper=wrapper,
+            target_layer=args.layer,
+            coefficient=args.coeff,
+        )
+        req = EditRequest(
+            prompt=args.prompt,
+            target_new=args.target,
+            ground_truth=args.ground_truth,
+        )
+        print(f"\n[EditMind] Injecting Steering Vector at Layer {args.layer} (coeff={args.coeff})...")
+        res = editor.edit(req)
+        print(f"Status               : {'SUCCESS' if res.success else 'FAILED'}")
+        print(f"Pre-Intervention Prob: {res.pre_edit_target_prob:.4f}")
+        print(f"Post-Intervention    : {res.post_edit_target_prob:.4f}")
+        print(f"Weight Delta Norm    : {res.details['weight_modification']} (Zero Weight Distortion)")
+        print(f"Latency              : {res.execution_time_sec * 1000:.2f} ms")
 
     elif args.command == "benchmark":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)

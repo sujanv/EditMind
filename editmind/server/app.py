@@ -35,6 +35,8 @@ from editmind.safety import (
 from editmind.models.localization import ConsensusLayerRanker
 from editmind.safety.unlearning import ConceptEraser
 from editmind.evaluation.factuality import SemanticEntropyEvaluator, FactualityReport
+from editmind.evaluation.reciprocal import FactualReciprocalAuditor
+from editmind.editors.steer import SteeringVectorEditor
 from editmind.server.schemas import (
     EditApiRequest,
     TraceApiRequest,
@@ -46,6 +48,8 @@ from editmind.server.schemas import (
     ResolveConflictApiRequest,
     LocalizeRequest,
     ConceptUnlearnRequest,
+    ReciprocalApiRequest,
+    SteerApiRequest,
 )
 
 app = FastAPI(
@@ -429,6 +433,38 @@ def perform_concept_erasure(req: ConceptUnlearnRequest):
         target_layers=req.target_layers,
     )
     return report.to_dict()
+
+
+@app.post("/api/reciprocal")
+def audit_reciprocal_consistency(req: ReciprocalApiRequest):
+    wrapper = get_model_wrapper()
+    auditor = FactualReciprocalAuditor(wrapper)
+    res = auditor.audit_edit_reciprocity(
+        subject=req.subject,
+        relation=req.relation,
+        target_new=req.target_new,
+        custom_inverse_prompt=req.custom_inverse_prompt,
+    )
+    return res.to_dict()
+
+
+@app.post("/api/steer")
+def perform_activation_steering(req: SteerApiRequest):
+    wrapper = get_model_wrapper()
+    editor = EditorRegistry.create(
+        "steer",
+        model_wrapper=wrapper,
+        target_layer=req.target_layer,
+        coefficient=req.coefficient,
+        max_norm=req.max_norm,
+    )
+    edit_req = EditRequest(
+        prompt=req.prompt,
+        target_new=req.target_new,
+        ground_truth=req.ground_truth,
+    )
+    res = editor.edit(edit_req)
+    return res.to_dict()
 
 
 dashboard_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "dashboard")

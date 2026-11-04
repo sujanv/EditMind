@@ -79,3 +79,19 @@ class ConceptUnlearnRequest(BaseModel):
     forget_prompts: List[str] = Field(..., json_schema_extra={"example": ["The secret key of Alice is", "Alice confidential token was"]})
     retain_prompts: List[str] = Field(..., json_schema_extra={"example": ["The capital of France is Paris", "Shakespeare was an English writer"]})
     target_layers: Optional[List[int]] = Field(None, json_schema_extra={"example": [2, 3]})
+
+
+class ReciprocalApiRequest(BaseModel):
+    subject: str = Field(..., json_schema_extra={"example": "France"})
+    relation: str = Field(..., json_schema_extra={"example": "capital"})
+    target_new: str = Field(..., json_schema_extra={"example": "Rome"})
+    custom_inverse_prompt: Optional[str] = Field(None, json_schema_extra={"example": "The country whose capital is Rome is"})
+
+
+class SteerApiRequest(BaseModel):
+    prompt: str = Field(..., json_schema_extra={"example": "The capital of France is"})
+    target_new: str = Field(..., json_schema_extra={"example": "Rome"})
+    ground_truth: Optional[str] = Field(None, json_schema_extra={"example": "Paris"})
+    target_layer: int = Field(2, json_schema_extra={"example": 2})
+    coefficient: float = Field(1.5, json_schema_extra={"example": 1.5})
+    max_norm: float = Field(5.0, json_schema_extra={"example": 5.0})

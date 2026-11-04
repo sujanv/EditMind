@@ -219,3 +219,34 @@ def test_concept_unlearn_endpoint():
     assert "utility_retention_score" in data
     assert "unlearning_completeness" in data
 
+
+def test_reciprocal_endpoint():
+    res = client.post("/api/reciprocal", json={
+        "subject": "France",
+        "relation": "capital",
+        "target_new": "Paris",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "directional_asymmetry_gap" in data
+    assert "reciprocal_consistency_score" in data
+    assert "reversal_curse_detected" in data
+    assert "summary" in data
+
+
+def test_steer_endpoint():
+    res = client.post("/api/steer", json={
+        "prompt": "The capital of France is",
+        "target_new": "Rome",
+        "ground_truth": "Paris",
+        "target_layer": 2,
+        "coefficient": 1.5,
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["editor_name"] == "steer"
+    assert "pre_edit_target_prob" in data
+    assert "post_edit_target_prob" in data
+    assert data["details"]["weight_modification"] == 0.0
+
+
