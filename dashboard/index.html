@@ -51,6 +51,8 @@
               <option value="lora_edit">LoRA-Edit (Low-Rank Parameter Adaptation)</option>
               <option value="qedit">Q-Edit (Quantized Low-Bit Adapter Editing)</option>
               <option value="kmoe">K-MoE (Knowledge Mixture of Experts)</option>
+              <option value="steer">Steer (Activation Steering Vector - ActAdd)</option>
+              <option value="batch_alphaedit">Batch-AlphaEdit (Batched Null-Space Projection)</option>
             </select>
           </div>
 
@@ -105,6 +107,7 @@
           <button class="tab-btn" data-tab="tab-multihop">🔗 Multi-Hop &amp; Audit</button>
           <button class="tab-btn" data-tab="tab-factuality">🎯 Factuality &amp; Resolution</button>
           <button class="tab-btn" data-tab="tab-consensus">🧬 Consensus &amp; Concept</button>
+          <button class="tab-btn" data-tab="tab-reciprocal">🔄 Reciprocal &amp; Steer</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -195,6 +198,19 @@
           </div>
 
           <div id="consensus-results" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Tab 9: Reciprocal Consistency & Activation Steering -->
+        <div class="tab-pane" id="tab-reciprocal">
+          <h3>🔄 Reciprocal Consistency &amp; Representation Steering</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Audit bidirectional knowledge consistency to detect the Reversal Curse (Directional Asymmetry Gap), or dynamically inject activation steering vectors into layer residual streams (ActAdd) with zero weight modification.</p>
+          
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+            <button type="button" id="btn-run-reciprocal" class="btn btn-secondary">🔄 Audit Reciprocal Coherence</button>
+            <button type="button" id="btn-run-steer" class="btn btn-accent">⚡ Inject Steering Vector (ActAdd)</button>
+          </div>
+
+          <div id="reciprocal-results" style="margin-top:12px;"></div>
         </div>
       </section>
     </main>

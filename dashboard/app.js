@@ -533,4 +533,63 @@ document.addEventListener("DOMContentLoaded", () => {
       resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error executing concept erasure: ${err.message}</p>`;
     }
   });
+
+  // Reciprocal Consistency Button
+  document.getElementById("btn-run-reciprocal").addEventListener("click", async () => {
+    const subject = document.getElementById("subject-input").value;
+    const target = document.getElementById("target-input").value;
+    const resultsContainer = document.getElementById("reciprocal-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Probing forward and reciprocal inverse assertions for directional asymmetry...</p>`;
+
+    try {
+      const res = await fetch("/api/reciprocal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject, relation: "capital", target_new: target })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🔄 Bidirectional Reciprocal Audit</h4>
+          <p><strong>Forward Probe:</strong> <code>"${data.forward_prompt}"</code> &rarr; <strong>Target:</strong> "${data.forward_target}" (Prob: ${data.forward_prob_post.toFixed(4)})</p>
+          <p><strong>Inverse Probe:</strong> <code>"${data.inverse_prompt}"</code> &rarr; <strong>Target:</strong> "${data.inverse_target}" (Prob: ${data.inverse_prob_post.toFixed(4)})</p>
+          <p><strong>Directional Asymmetry Gap (DAG):</strong> ${data.directional_asymmetry_gap.toFixed(4)} &bull; <strong>Reciprocal Consistency:</strong> ${(data.reciprocal_consistency_score * 100).toFixed(1)}%</p>
+          <p><strong>Reversal Curse Verdict:</strong> ${data.reversal_curse_detected ? '⚠️ <span style="color:#f38ba8; font-weight:bold;">Reversal Curse Detected</span>' : '✅ <span style="color:#a6e3a1; font-weight:bold;">Symmetric Alignment Verified</span>'}</p>
+          <p style="font-size:12px; color:#cdd6f4; margin-top:8px;">${data.summary}</p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error running reciprocal audit: ${err.message}</p>`;
+    }
+  });
+
+  // Steering Vector Injection Button
+  document.getElementById("btn-run-steer").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const target = document.getElementById("target-input").value;
+    const resultsContainer = document.getElementById("reciprocal-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Computing contrastive activation steering vector and hooking residual stream...</p>`;
+
+    try {
+      const res = await fetch("/api/steer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, target_new: target, target_layer: 2, coefficient: 1.5 })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>⚡ Activation Steering Vector (ActAdd)</h4>
+          <p><strong>Status:</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.success ? 'INTERVENED' : 'APPLIED'}</span> &bull; <strong>Editor:</strong> <code>${data.editor_name}</code></p>
+          <p><strong>Target Probability Shift:</strong> ${data.pre_edit_target_prob.toFixed(4)} &rarr; <span style="color:#a6e3a1; font-weight:bold;">${data.post_edit_target_prob.toFixed(4)}</span></p>
+          <p><strong>Weight Distortion:</strong> ${data.details.weight_modification} (Zero Parametric Distortion)</p>
+          <p><strong>Target Layer:</strong> Layer ${data.details.target_layer} &bull; <strong>Coefficient:</strong> ${data.details.coefficient} &bull; <strong>Active Vectors:</strong> ${data.details.active_vectors_count}</p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error injecting steering vector: ${err.message}</p>`;
+    }
+  });
 });
