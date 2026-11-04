@@ -8,6 +8,7 @@ from editmind.editors.pmet import PMETEditor
 from editmind.editors.alphaedit import AlphaEditEditor
 from editmind.editors.qedit import QuantizedKnowledgeEditor
 from editmind.editors.kmoe import KnowledgeMoEEditor
+from editmind.editors.steer import SteeringVectorEditor
 
 __all__ = [
     "ROMEEditor",
@@ -21,4 +22,5 @@ __all__ = [
     "AlphaEditEditor",
     "QuantizedKnowledgeEditor",
     "KnowledgeMoEEditor",
+    "SteeringVectorEditor",
 ]
