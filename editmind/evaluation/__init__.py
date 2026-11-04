@@ -18,6 +18,12 @@ from editmind.evaluation.factuality import (
     FactualityReport,
     SemanticCluster,
 )
+from editmind.evaluation.reciprocal import (
+    FactualReciprocalAuditor,
+    ReciprocalAuditResult,
+    ReciprocalPairProbe,
+    CANONICAL_INVERSES,
+)
 
 __all__ = [
     "compute_efficacy_score",
@@ -34,4 +40,8 @@ __all__ = [
     "SemanticEntropyEvaluator",
     "FactualityReport",
     "SemanticCluster",
+    "FactualReciprocalAuditor",
+    "ReciprocalAuditResult",
+    "ReciprocalPairProbe",
+    "CANONICAL_INVERSES",
 ]
