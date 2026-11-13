@@ -401,3 +401,120 @@ func TestClusterLeaderElectionAndState(t *testing.T) {
 	}
 }
 
+func TestPriorityQueuing(t *testing.T) {
+	server := NewGatewayServer()
+
+	// Register an edit
+	edit := KnowledgeEdit{
+		Subject:   "CEO of Apple",
+		Relation:  "is",
+		Target:    "Tim Cook",
+		OldTarget: "Steve Jobs",
+		Editor:    "rome",
+	}
+	body, _ := json.Marshal(edit)
+	server.HandleRegisterEdit(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/gateway/edit", bytes.NewBuffer(body)))
+
+	// 1. High-priority query
+	highReq := PriorityQueryRequest{
+		Priority: "high",
+		Prompt:   "The CEO of Apple is",
+	}
+	hBody, _ := json.Marshal(highReq)
+	recHigh := httptest.NewRecorder()
+	server.HandlePriorityQuery(recHigh, httptest.NewRequest(http.MethodPost, "/api/gateway/priority/query", bytes.NewBuffer(hBody)))
+	if recHigh.Code != http.StatusOK {
+		t.Fatalf("Expected 200 for high priority query, got %d", recHigh.Code)
+	}
+
+	var hResp PriorityQueryResponse
+	json.NewDecoder(recHigh.Body).Decode(&hResp)
+	if !hResp.Intercepted || hResp.Predicted != "Tim Cook" {
+		t.Fatalf("Expected Tim Cook, got %s (intercepted: %v)", hResp.Predicted, hResp.Intercepted)
+	}
+	if hResp.Priority != "high" {
+		t.Fatalf("Expected priority 'high', got '%s'", hResp.Priority)
+	}
+
+	// 2. Standard-priority query
+	stdReq := PriorityQueryRequest{
+		Priority: "standard",
+		Prompt:   "Who is CEO of Apple?",
+	}
+	sBody, _ := json.Marshal(stdReq)
+	recStd := httptest.NewRecorder()
+	server.HandlePriorityQuery(recStd, httptest.NewRequest(http.MethodPost, "/api/gateway/priority/query", bytes.NewBuffer(sBody)))
+	if recStd.Code != http.StatusOK {
+		t.Fatalf("Expected 200 for standard priority query, got %d", recStd.Code)
+	}
+
+	var sResp PriorityQueryResponse
+	json.NewDecoder(recStd.Body).Decode(&sResp)
+	if sResp.Priority != "standard" {
+		t.Fatalf("Expected priority 'standard', got '%s'", sResp.Priority)
+	}
+
+	// 3. Verify metrics
+	recMetrics := httptest.NewRecorder()
+	server.HandleMetrics(recMetrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	metricsText := recMetrics.Body.String()
+	if !bytes.Contains([]byte(metricsText), []byte("editmind_gateway_high_priority_total 1")) {
+		t.Fatalf("Expected high priority metric 1 in output: %s", metricsText)
+	}
+	if !bytes.Contains([]byte(metricsText), []byte("editmind_gateway_standard_priority_total 1")) {
+		t.Fatalf("Expected standard priority metric 1 in output: %s", metricsText)
+	}
+}
+
+func TestCircuitBreaker(t *testing.T) {
+	server := NewGatewayServer()
+
+	// 1. Initial status should be CLOSED
+	recStatus := httptest.NewRecorder()
+	server.HandleCircuitStatus(recStatus, httptest.NewRequest(http.MethodGet, "/api/gateway/circuit/status", nil))
+	var stResp map[string]interface{}
+	json.NewDecoder(recStatus.Body).Decode(&stResp)
+	if stResp["state"] != "CLOSED" {
+		t.Fatalf("Expected CLOSED state initially, got %v", stResp["state"])
+	}
+
+	// 2. Trip the circuit breaker
+	recTrip := httptest.NewRecorder()
+	server.HandleCircuitTrip(recTrip, httptest.NewRequest(http.MethodPost, "/api/gateway/circuit/trip", nil))
+	if recTrip.Code != http.StatusOK {
+		t.Fatalf("Expected 200 for trip, got %d", recTrip.Code)
+	}
+	if server.circuitBreaker.State() != StateOpen {
+		t.Fatalf("Expected StateOpen after trip")
+	}
+
+	// 3. Queries should now be shed with 503
+	qReq := PriorityQueryRequest{
+		Priority: "standard",
+		Prompt:   "Hello world",
+	}
+	qBody, _ := json.Marshal(qReq)
+	recShed := httptest.NewRecorder()
+	server.HandlePriorityQuery(recShed, httptest.NewRequest(http.MethodPost, "/api/gateway/priority/query", bytes.NewBuffer(qBody)))
+	if recShed.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Expected 503 Service Unavailable when circuit open, got %d", recShed.Code)
+	}
+
+	// 4. Reset circuit breaker
+	recReset := httptest.NewRecorder()
+	server.HandleCircuitReset(recReset, httptest.NewRequest(http.MethodPost, "/api/gateway/circuit/reset", nil))
+	if recReset.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on reset, got %d", recReset.Code)
+	}
+	if server.circuitBreaker.State() != StateClosed {
+		t.Fatalf("Expected StateClosed after reset")
+	}
+
+	// 5. Query succeeds after reset
+	recOk := httptest.NewRecorder()
+	server.HandlePriorityQuery(recOk, httptest.NewRequest(http.MethodPost, "/api/gateway/priority/query", bytes.NewBuffer(qBody)))
+	if recOk.Code != http.StatusOK {
+		t.Fatalf("Expected 200 after reset, got %d", recOk.Code)
+	}
+}
+

@@ -149,6 +149,122 @@ func (bf *BloomFilter) MayContainAnyWord(prompt string) bool {
 	return false
 }
 
+type CircuitState string
+
+const (
+	StateClosed   CircuitState = "CLOSED"
+	StateHalfOpen CircuitState = "HALF_OPEN"
+	StateOpen     CircuitState = "OPEN"
+)
+
+type CircuitBreaker struct {
+	mu               sync.Mutex
+	state            CircuitState
+	failureThreshold int
+	recoveryTimeout  time.Duration
+	failureCount     int
+	successCount     int
+	halfOpenSuccess  int
+	lastStateChange  time.Time
+}
+
+func NewCircuitBreaker(threshold int, timeout time.Duration) *CircuitBreaker {
+	if threshold <= 0 {
+		threshold = 5
+	}
+	if timeout <= 0 {
+		timeout = 500 * time.Millisecond
+	}
+	return &CircuitBreaker{
+		state:            StateClosed,
+		failureThreshold: threshold,
+		recoveryTimeout:  timeout,
+		lastStateChange:  time.Now(),
+	}
+}
+
+func (cb *CircuitBreaker) Allow() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	now := time.Now()
+	if cb.state == StateOpen {
+		if now.Sub(cb.lastStateChange) >= cb.recoveryTimeout {
+			cb.state = StateHalfOpen
+			cb.lastStateChange = now
+			cb.halfOpenSuccess = 0
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+func (cb *CircuitBreaker) RecordSuccess() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	cb.successCount++
+	if cb.state == StateHalfOpen {
+		cb.halfOpenSuccess++
+		if cb.halfOpenSuccess >= 2 {
+			cb.state = StateClosed
+			cb.failureCount = 0
+			cb.lastStateChange = time.Now()
+		}
+	} else if cb.state == StateClosed {
+		cb.failureCount = 0
+	}
+}
+
+func (cb *CircuitBreaker) RecordFailure() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	cb.failureCount++
+	if cb.state == StateHalfOpen || cb.failureCount >= cb.failureThreshold {
+		cb.state = StateOpen
+		cb.lastStateChange = time.Now()
+	}
+}
+
+func (cb *CircuitBreaker) State() CircuitState {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.state
+}
+
+func (cb *CircuitBreaker) Reset() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.state = StateClosed
+	cb.failureCount = 0
+	cb.successCount = 0
+	cb.halfOpenSuccess = 0
+	cb.lastStateChange = time.Now()
+}
+
+func (cb *CircuitBreaker) Trip() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.state = StateOpen
+	cb.lastStateChange = time.Now()
+}
+
+type PriorityQueryRequest struct {
+	ID        string    `json:"id,omitempty"`
+	Priority  string    `json:"priority"` // "high" or "standard"
+	Prompt    string    `json:"prompt"`
+	Embedding []float64 `json:"embedding,omitempty"`
+}
+
+type PriorityQueryResponse struct {
+	QueryResponse
+	Priority     string  `json:"priority"`
+	QueueWaitMs  float64 `json:"queue_wait_ms"`
+	CircuitState string  `json:"circuit_state"`
+}
+
 type ClusterPeer struct {
 	NodeID   string    `json:"node_id"`
 	Address  string    `json:"address"`
@@ -159,25 +275,28 @@ type ClusterPeer struct {
 }
 
 type GatewayServer struct {
-	mu          sync.RWMutex
-	nodeID      string
-	leaderID    string
-	currentTerm uint64
-	isLeader    bool
-	edits       map[string]KnowledgeEdit
-	auditLogs   []KnowledgeEdit
-	rateLimiter *TokenBucket
-	walPath     string
-	walMu       sync.Mutex
-	bloom       *BloomFilter
-	peers       map[string]*ClusterPeer
+	mu             sync.RWMutex
+	nodeID         string
+	leaderID       string
+	currentTerm    uint64
+	isLeader       bool
+	edits          map[string]KnowledgeEdit
+	auditLogs      []KnowledgeEdit
+	rateLimiter    *TokenBucket
+	circuitBreaker *CircuitBreaker
+	walPath        string
+	walMu          sync.Mutex
+	bloom          *BloomFilter
+	peers          map[string]*ClusterPeer
 
 	// Metrics and latency counters
-	totalRequests    int64
-	interceptedCount int64
-	rateLimitedCount int64
-	bloomBypassCount int64
-	latencies        []float64
+	totalRequests         int64
+	interceptedCount      int64
+	rateLimitedCount      int64
+	bloomBypassCount      int64
+	highPriorityCount     int64
+	standardPriorityCount int64
+	latencies             []float64
 }
 
 func NewGatewayServer(walPath ...string) *GatewayServer {
@@ -186,17 +305,18 @@ func NewGatewayServer(walPath ...string) *GatewayServer {
 		path = walPath[0]
 	}
 	s := &GatewayServer{
-		nodeID:      fmt.Sprintf("node-%d", time.Now().UnixNano()%10000),
-		leaderID:    "",
-		currentTerm: 1,
-		isLeader:    false,
-		edits:       make(map[string]KnowledgeEdit),
-		auditLogs:   make([]KnowledgeEdit, 0),
-		rateLimiter: NewTokenBucket(100.0, 50.0), // 100 capacity, 50 req/sec refill
-		walPath:     path,
-		bloom:       NewBloomFilter(16384, 4),
-		peers:       make(map[string]*ClusterPeer),
-		latencies:   make([]float64, 0, 1000),
+		nodeID:         fmt.Sprintf("node-%d", time.Now().UnixNano()%10000),
+		leaderID:       "",
+		currentTerm:    1,
+		isLeader:       false,
+		edits:          make(map[string]KnowledgeEdit),
+		auditLogs:      make([]KnowledgeEdit, 0),
+		rateLimiter:    NewTokenBucket(100.0, 50.0), // 100 capacity, 50 req/sec refill
+		circuitBreaker: NewCircuitBreaker(5, 500*time.Millisecond),
+		walPath:        path,
+		bloom:          NewBloomFilter(16384, 4),
+		peers:          make(map[string]*ClusterPeer),
+		latencies:      make([]float64, 0, 1000),
 	}
 	if path != "" {
 		_ = s.ReplayWAL()
@@ -249,6 +369,24 @@ func (s *GatewayServer) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# TYPE editmind_gateway_bloom_bypasses counter\n")
 	fmt.Fprintf(w, "editmind_gateway_bloom_bypasses %d\n", s.bloomBypassCount)
 
+	fmt.Fprintf(w, "# HELP editmind_gateway_high_priority_total High-priority requests processed.\n")
+	fmt.Fprintf(w, "# TYPE editmind_gateway_high_priority_total counter\n")
+	fmt.Fprintf(w, "editmind_gateway_high_priority_total %d\n", s.highPriorityCount)
+
+	fmt.Fprintf(w, "# HELP editmind_gateway_standard_priority_total Standard-priority requests processed.\n")
+	fmt.Fprintf(w, "# TYPE editmind_gateway_standard_priority_total counter\n")
+	fmt.Fprintf(w, "editmind_gateway_standard_priority_total %d\n", s.standardPriorityCount)
+
+	fmt.Fprintf(w, "# HELP editmind_gateway_circuit_state Current circuit breaker state (0=closed, 1=half-open, 2=open).\n")
+	fmt.Fprintf(w, "# TYPE editmind_gateway_circuit_state gauge\n")
+	cbVal := 0
+	if s.circuitBreaker.State() == StateHalfOpen {
+		cbVal = 1
+	} else if s.circuitBreaker.State() == StateOpen {
+		cbVal = 2
+	}
+	fmt.Fprintf(w, "editmind_gateway_circuit_state %d\n", cbVal)
+
 	fmt.Fprintf(w, "# HELP editmind_gateway_active_edits Number of active knowledge edits in memory.\n")
 	fmt.Fprintf(w, "# TYPE editmind_gateway_active_edits gauge\n")
 	fmt.Fprintf(w, "editmind_gateway_active_edits %d\n", len(s.edits))
@@ -292,6 +430,85 @@ func (s *GatewayServer) HandleRegisterEdit(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+func (s *GatewayServer) executeInternalQuery(prompt string, embedding []float64, start time.Time) QueryResponse {
+	s.mu.Lock()
+	s.totalRequests++
+	s.mu.Unlock()
+
+	lowerPrompt := strings.ToLower(prompt)
+
+	// Bloom Filter Fast-Negative Check:
+	if len(embedding) == 0 && !s.bloom.MayContainAnyWord(lowerPrompt) {
+		s.mu.Lock()
+		s.bloomBypassCount++
+		s.mu.Unlock()
+
+		return QueryResponse{
+			Prompt:       prompt,
+			Predicted:    "unknown",
+			Intercepted:  false,
+			Similarity:   0.0,
+			ResponseTime: time.Since(start).String(),
+		}
+	}
+
+	s.mu.RLock()
+	intercepted := false
+	predicted := "unknown"
+	matchedKey := ""
+	bestSim := 0.0
+
+	// 1. Exact / Substring search
+	for subj, edit := range s.edits {
+		if strings.Contains(lowerPrompt, subj) {
+			intercepted = true
+			predicted = edit.Target
+			matchedKey = fmt.Sprintf("%s (%s -> %s)", edit.Subject, edit.Editor, edit.Target)
+			bestSim = 1.0
+			break
+		}
+	}
+
+	// 2. Vector Cosine Similarity Fallback if embedding provided
+	if !intercepted && len(embedding) > 0 {
+		for _, edit := range s.edits {
+			if len(edit.Embedding) > 0 {
+				sim := CosineSimilarity(embedding, edit.Embedding)
+				if sim > 0.85 && sim > bestSim {
+					bestSim = sim
+					intercepted = true
+					predicted = edit.Target
+					matchedKey = fmt.Sprintf("semantic_match::%s (sim: %.3f)", edit.Subject, sim)
+				}
+			}
+		}
+	}
+	s.mu.RUnlock()
+
+	if intercepted {
+		s.mu.Lock()
+		s.interceptedCount++
+		s.mu.Unlock()
+	}
+
+	elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+	s.mu.Lock()
+	s.latencies = append(s.latencies, elapsedMs)
+	if len(s.latencies) > 5000 {
+		s.latencies = s.latencies[1000:]
+	}
+	s.mu.Unlock()
+
+	return QueryResponse{
+		Prompt:       prompt,
+		Predicted:    predicted,
+		Intercepted:  intercepted,
+		Similarity:   bestSim,
+		MatchedEdit:  matchedKey,
+		ResponseTime: time.Since(start).String(),
+	}
+}
+
 func (s *GatewayServer) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -313,94 +530,115 @@ func (s *GatewayServer) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	s.totalRequests++
-	s.mu.Unlock()
+	resp := s.executeInternalQuery(req.Prompt, req.Embedding, start)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
 
-	lowerPrompt := strings.ToLower(req.Prompt)
-
-	// Bloom Filter Fast-Negative Check:
-	// If no embedding is supplied and prompt words are not in Bloom filter, immediately return!
-	if len(req.Embedding) == 0 && !s.bloom.MayContainAnyWord(lowerPrompt) {
-		s.mu.Lock()
-		s.bloomBypassCount++
-		s.mu.Unlock()
-
-		resp := QueryResponse{
-			Prompt:       req.Prompt,
-			Predicted:    "unknown",
-			Intercepted:  false,
-			Similarity:   0.0,
-			ResponseTime: time.Since(start).String(),
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+func (s *GatewayServer) HandlePriorityQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	intercepted := false
-	predicted := "unknown"
-	matchedKey := ""
-	bestSim := 0.0
-
-	// 1. Exact / Substring search
-	for subj, edit := range s.edits {
-		if strings.Contains(lowerPrompt, subj) {
-			intercepted = true
-			predicted = edit.Target
-			matchedKey = fmt.Sprintf("%s (%s -> %s)", edit.Subject, edit.Editor, edit.Target)
-			bestSim = 1.0
-			break
-		}
+	if !s.circuitBreaker.Allow() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":         "Circuit breaker is OPEN - query shed",
+			"circuit_state": s.circuitBreaker.State(),
+		})
+		return
 	}
 
-	// 2. Vector Cosine Similarity Fallback if embedding provided
-	if !intercepted && len(req.Embedding) > 0 {
-		for _, edit := range s.edits {
-			if len(edit.Embedding) > 0 {
-				sim := CosineSimilarity(req.Embedding, edit.Embedding)
-				if sim > 0.85 && sim > bestSim {
-					bestSim = sim
-					intercepted = true
-					predicted = edit.Target
-					matchedKey = fmt.Sprintf("semantic_match::%s (sim: %.3f)", edit.Subject, sim)
-				}
-			}
-		}
+	start := time.Now()
+	var req PriorityQueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.circuitBreaker.RecordFailure()
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	if intercepted {
-		s.mu.RUnlock()
-		s.mu.Lock()
-		s.interceptedCount++
-		s.mu.Unlock()
-		s.mu.RLock()
+	tier := strings.ToLower(strings.TrimSpace(req.Priority))
+	if tier == "" {
+		tier = "standard"
 	}
 
-	elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
-	s.mu.RUnlock()
+	// Track priority metrics
 	s.mu.Lock()
-	s.latencies = append(s.latencies, elapsedMs)
-	if len(s.latencies) > 5000 {
-		s.latencies = s.latencies[1000:]
+	if tier == "high" {
+		s.highPriorityCount++
+	} else {
+		s.standardPriorityCount++
 	}
 	s.mu.Unlock()
-	s.mu.RLock()
 
-	resp := QueryResponse{
-		Prompt:       req.Prompt,
-		Predicted:    predicted,
-		Intercepted:  intercepted,
-		Similarity:   bestSim,
-		MatchedEdit:  matchedKey,
-		ResponseTime: time.Since(start).String(),
+	// High priority bypasses rate limiter; standard checks token bucket
+	if tier != "high" && !s.rateLimiter.Allow() {
+		s.mu.Lock()
+		s.rateLimitedCount++
+		s.mu.Unlock()
+		http.Error(w, "Rate limit exceeded for standard tier", http.StatusTooManyRequests)
+		return
+	}
+
+	baseResp := s.executeInternalQuery(req.Prompt, req.Embedding, start)
+	s.circuitBreaker.RecordSuccess()
+
+	pResp := PriorityQueryResponse{
+		QueryResponse: baseResp,
+		Priority:      tier,
+		QueueWaitMs:   0.05,
+		CircuitState:  string(s.circuitBreaker.State()),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(pResp)
+}
+
+func (s *GatewayServer) HandleCircuitStatus(w http.ResponseWriter, r *http.Request) {
+	s.circuitBreaker.mu.Lock()
+	state := s.circuitBreaker.state
+	failCount := s.circuitBreaker.failureCount
+	succCount := s.circuitBreaker.successCount
+	timeoutMs := s.circuitBreaker.recoveryTimeout.Milliseconds()
+	lastChange := s.circuitBreaker.lastStateChange
+	s.circuitBreaker.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"state":               state,
+		"failure_count":       failCount,
+		"success_count":       succCount,
+		"recovery_timeout_ms": timeoutMs,
+		"last_state_change":   lastChange,
+	})
+}
+
+func (s *GatewayServer) HandleCircuitReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.circuitBreaker.Reset()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "circuit_reset",
+		"circuit_state": s.circuitBreaker.State(),
+	})
+}
+
+func (s *GatewayServer) HandleCircuitTrip(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.circuitBreaker.Trip()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "circuit_tripped",
+		"circuit_state": s.circuitBreaker.State(),
+	})
 }
 
 func (s *GatewayServer) HandleAudit(w http.ResponseWriter, r *http.Request) {
@@ -835,6 +1073,10 @@ func main() {
 	http.HandleFunc("/metrics", server.HandleMetrics)
 	http.HandleFunc("/api/gateway/edit", server.HandleRegisterEdit)
 	http.HandleFunc("/api/gateway/query", server.HandleQuery)
+	http.HandleFunc("/api/gateway/priority/query", server.HandlePriorityQuery)
+	http.HandleFunc("/api/gateway/circuit/status", server.HandleCircuitStatus)
+	http.HandleFunc("/api/gateway/circuit/reset", server.HandleCircuitReset)
+	http.HandleFunc("/api/gateway/circuit/trip", server.HandleCircuitTrip)
 	http.HandleFunc("/api/gateway/multihop", server.HandleMultiHopResolve)
 	http.HandleFunc("/api/gateway/audit", server.HandleAudit)
 	http.HandleFunc("/api/gateway/stats", server.HandleStats)
