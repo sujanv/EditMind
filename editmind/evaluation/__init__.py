@@ -24,6 +24,11 @@ from editmind.evaluation.reciprocal import (
     ReciprocalPairProbe,
     CANONICAL_INVERSES,
 )
+from editmind.evaluation.generalization import (
+    PerturbationProbe,
+    GeneralizationAuditReport,
+    GeneralizationAuditor,
+)
 
 __all__ = [
     "compute_efficacy_score",
@@ -44,4 +49,7 @@ __all__ = [
     "ReciprocalAuditResult",
     "ReciprocalPairProbe",
     "CANONICAL_INVERSES",
+    "PerturbationProbe",
+    "GeneralizationAuditReport",
+    "GeneralizationAuditor",
 ]
