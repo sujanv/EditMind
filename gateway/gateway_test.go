@@ -518,3 +518,77 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 }
 
+func TestSlidingWindowRateLimiter(t *testing.T) {
+	limiter := NewSlidingWindowLimiter(100*time.Millisecond, 2)
+	if !limiter.Allow() {
+		t.Fatalf("1st request should be allowed")
+	}
+	if !limiter.Allow() {
+		t.Fatalf("2nd request should be allowed")
+	}
+	if limiter.Allow() {
+		t.Fatalf("3rd request within window should be rejected")
+	}
+	if limiter.Count() != 2 {
+		t.Fatalf("Expected count 2, got %d", limiter.Count())
+	}
+
+	time.Sleep(110 * time.Millisecond)
+	if !limiter.Allow() {
+		t.Fatalf("Request after window expiration should be allowed")
+	}
+}
+
+func TestClientReputation(t *testing.T) {
+	server := NewGatewayServer()
+
+	// 1. Normal client request
+	qReq := QueryRequest{Prompt: "The capital of France is"}
+	qBody, _ := json.Marshal(qReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/gateway/query", bytes.NewBuffer(qBody))
+	req.Header.Set("X-Client-ID", "client-alpha")
+	w := httptest.NewRecorder()
+	server.HandleQuery(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200 for normal client, got %d", w.Code)
+	}
+
+	// 2. Penalize client reputation into quarantine
+	for i := 0; i < 4; i++ {
+		server.clientRep.RecordViolation("client-alpha")
+	}
+
+	// 3. Quarantined client should be blocked with 403
+	req2 := httptest.NewRequest(http.MethodPost, "/api/gateway/query", bytes.NewBuffer(qBody))
+	req2.Header.Set("X-Client-ID", "client-alpha")
+	w2 := httptest.NewRecorder()
+	server.HandleQuery(w2, req2)
+	if w2.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for quarantined client, got %d", w2.Code)
+	}
+
+	// 4. Inspect client stats endpoint
+	recStats := httptest.NewRecorder()
+	server.HandleClientStats(recStats, httptest.NewRequest(http.MethodGet, "/api/gateway/clients/stats", nil))
+	if recStats.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on client stats, got %d", recStats.Code)
+	}
+
+	// 5. Reset client reputation
+	resetBody, _ := json.Marshal(map[string]string{"client_id": "client-alpha"})
+	recReset := httptest.NewRecorder()
+	server.HandleClientReputationReset(recReset, httptest.NewRequest(http.MethodPost, "/api/gateway/clients/reset", bytes.NewBuffer(resetBody)))
+	if recReset.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on client reset, got %d", recReset.Code)
+	}
+
+	// 6. Request succeeds again
+	req3 := httptest.NewRequest(http.MethodPost, "/api/gateway/query", bytes.NewBuffer(qBody))
+	req3.Header.Set("X-Client-ID", "client-alpha")
+	w3 := httptest.NewRecorder()
+	server.HandleQuery(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("Expected 200 after reset, got %d", w3.Code)
+	}
+}
+

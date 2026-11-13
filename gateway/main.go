@@ -265,6 +265,155 @@ type PriorityQueryResponse struct {
 	CircuitState string  `json:"circuit_state"`
 }
 
+type SlidingWindowLimiter struct {
+	mu          sync.Mutex
+	window      time.Duration
+	maxRequests int
+	timestamps  []time.Time
+}
+
+func NewSlidingWindowLimiter(window time.Duration, maxRequests int) *SlidingWindowLimiter {
+	return &SlidingWindowLimiter{
+		window:      window,
+		maxRequests: maxRequests,
+		timestamps:  make([]time.Time, 0, maxRequests*2),
+	}
+}
+
+func (sw *SlidingWindowLimiter) Allow() bool {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-sw.window)
+
+	i := 0
+	for i < len(sw.timestamps) && sw.timestamps[i].Before(cutoff) {
+		i++
+	}
+	if i > 0 {
+		sw.timestamps = sw.timestamps[i:]
+	}
+
+	if len(sw.timestamps) < sw.maxRequests {
+		sw.timestamps = append(sw.timestamps, now)
+		return true
+	}
+	return false
+}
+
+func (sw *SlidingWindowLimiter) Count() int {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	cutoff := time.Now().Add(-sw.window)
+	count := 0
+	for _, t := range sw.timestamps {
+		if t.After(cutoff) {
+			count++
+		}
+	}
+	return count
+}
+
+type ClientReputation struct {
+	ClientID      string    `json:"client_id"`
+	Score         float64   `json:"score"`
+	TotalRequests int64     `json:"total_requests"`
+	Violations    int       `json:"violations"`
+	Status        string    `json:"status"` // "active", "degraded", "quarantined"
+	LastSeen      time.Time `json:"last_seen"`
+}
+
+type ClientReputationManager struct {
+	mu      sync.RWMutex
+	clients map[string]*ClientReputation
+}
+
+func NewClientReputationManager() *ClientReputationManager {
+	return &ClientReputationManager{
+		clients: make(map[string]*ClientReputation),
+	}
+}
+
+func (crm *ClientReputationManager) RecordRequest(clientID string) (bool, string) {
+	if clientID == "" {
+		return true, "active"
+	}
+	crm.mu.Lock()
+	defer crm.mu.Unlock()
+
+	client, exists := crm.clients[clientID]
+	if !exists {
+		client = &ClientReputation{
+			ClientID:      clientID,
+			Score:         100.0,
+			TotalRequests: 1,
+			Violations:    0,
+			Status:        "active",
+			LastSeen:      time.Now(),
+		}
+		crm.clients[clientID] = client
+		return true, "active"
+	}
+
+	client.TotalRequests++
+	client.LastSeen = time.Now()
+	if client.Score < 100.0 {
+		client.Score = math.Min(100.0, client.Score+0.2)
+	}
+
+	if client.Status == "quarantined" {
+		return false, "quarantined"
+	}
+	return true, client.Status
+}
+
+func (crm *ClientReputationManager) RecordViolation(clientID string) {
+	if clientID == "" {
+		return
+	}
+	crm.mu.Lock()
+	defer crm.mu.Unlock()
+
+	client, exists := crm.clients[clientID]
+	if !exists {
+		client = &ClientReputation{
+			ClientID: clientID,
+			Score:    100.0,
+			LastSeen: time.Now(),
+		}
+		crm.clients[clientID] = client
+	}
+
+	client.Violations++
+	client.Score = math.Max(0.0, client.Score-20.0)
+	if client.Score < 40.0 {
+		client.Status = "quarantined"
+	} else if client.Score < 70.0 {
+		client.Status = "degraded"
+	}
+}
+
+func (crm *ClientReputationManager) Reset(clientID string) {
+	crm.mu.Lock()
+	defer crm.mu.Unlock()
+	if client, exists := crm.clients[clientID]; exists {
+		client.Score = 100.0
+		client.Status = "active"
+		client.Violations = 0
+	}
+}
+
+func (crm *ClientReputationManager) GetAll() []ClientReputation {
+	crm.mu.RLock()
+	defer crm.mu.RUnlock()
+	res := make([]ClientReputation, 0, len(crm.clients))
+	for _, c := range crm.clients {
+		res = append(res, *c)
+	}
+	return res
+}
+
 type ClusterPeer struct {
 	NodeID   string    `json:"node_id"`
 	Address  string    `json:"address"`
@@ -284,6 +433,8 @@ type GatewayServer struct {
 	auditLogs      []KnowledgeEdit
 	rateLimiter    *TokenBucket
 	circuitBreaker *CircuitBreaker
+	slidingLimiter *SlidingWindowLimiter
+	clientRep      *ClientReputationManager
 	walPath        string
 	walMu          sync.Mutex
 	bloom          *BloomFilter
@@ -313,6 +464,8 @@ func NewGatewayServer(walPath ...string) *GatewayServer {
 		auditLogs:      make([]KnowledgeEdit, 0),
 		rateLimiter:    NewTokenBucket(100.0, 50.0), // 100 capacity, 50 req/sec refill
 		circuitBreaker: NewCircuitBreaker(5, 500*time.Millisecond),
+		slidingLimiter: NewSlidingWindowLimiter(10*time.Second, 500),
+		clientRep:      NewClientReputationManager(),
 		walPath:        path,
 		bloom:          NewBloomFilter(16384, 4),
 		peers:          make(map[string]*ClusterPeer),
@@ -515,10 +668,30 @@ func (s *GatewayServer) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientID := r.Header.Get("X-Client-ID")
+	if clientID != "" {
+		allowed, _ := s.clientRep.RecordRequest(clientID)
+		if !allowed {
+			http.Error(w, fmt.Sprintf("Client '%s' is quarantined due to low reputation score", clientID), http.StatusForbidden)
+			return
+		}
+	}
+
+	if !s.slidingLimiter.Allow() {
+		if clientID != "" {
+			s.clientRep.RecordViolation(clientID)
+		}
+		http.Error(w, "Sliding-window rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
 	if !s.rateLimiter.Allow() {
 		s.mu.Lock()
 		s.rateLimitedCount++
 		s.mu.Unlock()
+		if clientID != "" {
+			s.clientRep.RecordViolation(clientID)
+		}
 		http.Error(w, "Rate limit exceeded (token bucket exhausted)", http.StatusTooManyRequests)
 		return
 	}
@@ -539,6 +712,15 @@ func (s *GatewayServer) HandlePriorityQuery(w http.ResponseWriter, r *http.Reque
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	clientID := r.Header.Get("X-Client-ID")
+	if clientID != "" {
+		allowed, _ := s.clientRep.RecordRequest(clientID)
+		if !allowed {
+			http.Error(w, fmt.Sprintf("Client '%s' is quarantined due to low reputation score", clientID), http.StatusForbidden)
+			return
+		}
 	}
 
 	if !s.circuitBreaker.Allow() {
@@ -573,13 +755,25 @@ func (s *GatewayServer) HandlePriorityQuery(w http.ResponseWriter, r *http.Reque
 	}
 	s.mu.Unlock()
 
-	// High priority bypasses rate limiter; standard checks token bucket
-	if tier != "high" && !s.rateLimiter.Allow() {
-		s.mu.Lock()
-		s.rateLimitedCount++
-		s.mu.Unlock()
-		http.Error(w, "Rate limit exceeded for standard tier", http.StatusTooManyRequests)
-		return
+	// High priority bypasses rate limiter; standard checks sliding limiter and token bucket
+	if tier != "high" {
+		if !s.slidingLimiter.Allow() {
+			if clientID != "" {
+				s.clientRep.RecordViolation(clientID)
+			}
+			http.Error(w, "Sliding-window rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		if !s.rateLimiter.Allow() {
+			s.mu.Lock()
+			s.rateLimitedCount++
+			s.mu.Unlock()
+			if clientID != "" {
+				s.clientRep.RecordViolation(clientID)
+			}
+			http.Error(w, "Rate limit exceeded for standard tier", http.StatusTooManyRequests)
+			return
+		}
 	}
 
 	baseResp := s.executeInternalQuery(req.Prompt, req.Embedding, start)
@@ -638,6 +832,44 @@ func (s *GatewayServer) HandleCircuitTrip(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":        "circuit_tripped",
 		"circuit_state": s.circuitBreaker.State(),
+	})
+}
+
+func (s *GatewayServer) HandleClientStats(w http.ResponseWriter, r *http.Request) {
+	clients := s.clientRep.GetAll()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_clients": len(clients),
+		"clients":       clients,
+	})
+}
+
+func (s *GatewayServer) HandleClientReputationReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.clientRep.Reset(req.ClientID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "reset",
+		"client_id": req.ClientID,
+	})
+}
+
+func (s *GatewayServer) HandleSlidingStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"sliding_window_sec": 10,
+		"active_requests":    s.slidingLimiter.Count(),
+		"max_requests":       s.slidingLimiter.maxRequests,
 	})
 }
 
@@ -1077,6 +1309,9 @@ func main() {
 	http.HandleFunc("/api/gateway/circuit/status", server.HandleCircuitStatus)
 	http.HandleFunc("/api/gateway/circuit/reset", server.HandleCircuitReset)
 	http.HandleFunc("/api/gateway/circuit/trip", server.HandleCircuitTrip)
+	http.HandleFunc("/api/gateway/clients/stats", server.HandleClientStats)
+	http.HandleFunc("/api/gateway/clients/reset", server.HandleClientReputationReset)
+	http.HandleFunc("/api/gateway/sliding/stats", server.HandleSlidingStats)
 	http.HandleFunc("/api/gateway/multihop", server.HandleMultiHopResolve)
 	http.HandleFunc("/api/gateway/audit", server.HandleAudit)
 	http.HandleFunc("/api/gateway/stats", server.HandleStats)
