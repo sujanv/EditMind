@@ -9,6 +9,7 @@ from editmind.editors.alphaedit import AlphaEditEditor, BatchAlphaEditor
 from editmind.editors.qedit import QuantizedKnowledgeEditor
 from editmind.editors.kmoe import KnowledgeMoEEditor
 from editmind.editors.steer import SteeringVectorEditor
+from editmind.editors.caedit import CrossAttentionEditor
 
 __all__ = [
     "ROMEEditor",
@@ -24,4 +25,5 @@ __all__ = [
     "QuantizedKnowledgeEditor",
     "KnowledgeMoEEditor",
     "SteeringVectorEditor",
+    "CrossAttentionEditor",
 ]
