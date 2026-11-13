@@ -72,38 +72,39 @@ def main():
     parser.add_argument("--push-first-now", action="store_true", default=False, help="Push the first commit immediately without initial delay")
     parser.add_argument("--branch", type=str, default="main")
     parser.add_argument("--remote", type=str, default="origin")
+    parser.add_argument("--continuous", action="store_true", default=True, help="Continuously poll for new unpushed commits")
     args = parser.parse_args()
 
     log("EditMind Staggered Pusher Daemon initialized.")
     log(f"Interval configured: {args.min_delay // 60}m - {args.max_delay // 60}m random jitter.")
 
-    commits = get_unpushed_commits(f"{args.remote}/{args.branch}", args.branch)
-    if not commits:
-        log("No unpushed commits found. Working tree up to date with remote.")
-        return
+    first_push = args.push_first_now
+    while True:
+        commits = get_unpushed_commits(f"{args.remote}/{args.branch}", args.branch)
+        if not commits:
+            log("No unpushed commits found. Working tree up to date with remote.")
+            if not args.continuous:
+                break
+            time.sleep(60)
+            continue
 
-    log(f"Found {len(commits)} commits queued for sequential push:")
-    for idx, c in enumerate(commits):
-        log(f"  [{idx+1}/{len(commits)}] {c['hash'][:8]} - {c['subject']}")
-
-    for idx, c in enumerate(commits):
-        if idx == 0 and args.push_first_now:
-            log(f"Pushing commit 1/{len(commits)} immediately without delay...")
+        c = commits[0]
+        if first_push:
+            log(f"Pushing commit immediately: {c['hash'][:8]} - '{c['subject']}'")
+            first_push = False
         else:
             delay = random.randint(args.min_delay, args.max_delay)
             next_time = (datetime.datetime.now() + datetime.timedelta(seconds=delay)).strftime("%H:%M:%S")
-            log(f"Waiting {delay // 60} minutes {delay % 60} seconds (until ~{next_time}) before next push...")
+            log(f"Waiting {delay // 60} minutes {delay % 60} seconds (until ~{next_time}) before next push: {c['hash'][:8]} - '{c['subject']}' ({len(commits)} commits pending)...")
             time.sleep(delay)
 
         success = push_single_commit(c["hash"], branch=args.branch, remote=args.remote)
         if success:
-            log(f"Successfully pushed commit [{idx+1}/{len(commits)}] {c['hash'][:8]}: '{c['subject']}'")
+            log(f"Successfully pushed commit {c['hash'][:8]}: '{c['subject']}'")
         else:
             log(f"Failed to push {c['hash'][:8]}. Retrying in 60 seconds...")
             time.sleep(60)
             push_single_commit(c["hash"], branch=args.branch, remote=args.remote)
-
-    log("All queued commits pushed successfully! Daemon exiting.")
 
 
 if __name__ == "__main__":
