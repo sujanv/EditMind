@@ -13,6 +13,11 @@ from editmind.safety.resolver import (
     ResolutionDecision,
     ScopedKnowledgeFact,
 )
+from editmind.safety.multiconcept import (
+    ConceptDefinition,
+    MultiConceptUnlearnReport,
+    JointSubspaceEraser,
+)
 
 __all__ = [
     "KnowledgeConflictDetector",
@@ -28,4 +33,7 @@ __all__ = [
     "ResolutionStrategy",
     "ResolutionDecision",
     "ScopedKnowledgeFact",
+    "ConceptDefinition",
+    "MultiConceptUnlearnReport",
+    "JointSubspaceEraser",
 ]
