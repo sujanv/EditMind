@@ -250,3 +250,32 @@ def test_steer_endpoint():
     assert data["details"]["weight_modification"] == 0.0
 
 
+def test_route_endpoint():
+    res = client.post("/api/route", json={
+        "prompt": "The capital of France is Paris",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["domain"] == "geography"
+    assert data["recommended_paradigm"] == "rome"
+    assert "confidence" in data
+    assert "domain_scores" in data
+    assert "justification" in data
+
+
+def test_pareto_endpoint():
+    res = client.post("/api/pareto", json={
+        "sample_count": 2,
+        "collapse_threshold": 0.4,
+        "editor_method": "grace",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["editor_name"] == "grace"
+    assert data["trajectory_length"] == 2
+    assert "aurc" in data
+    assert "interference_dispersion_index" in data
+    assert len(data["pareto_points"]) == 2
+
+
+

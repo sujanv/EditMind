@@ -95,3 +95,15 @@ class SteerApiRequest(BaseModel):
     target_layer: int = Field(2, json_schema_extra={"example": 2})
     coefficient: float = Field(1.5, json_schema_extra={"example": 1.5})
     max_norm: float = Field(5.0, json_schema_extra={"example": 5.0})
+
+
+class RouteApiRequest(BaseModel):
+    prompt: str = Field(..., json_schema_extra={"example": "The capital of France is Paris"})
+    domain_hint: Optional[str] = Field(None, json_schema_extra={"example": "geography"})
+    allow_fallbacks: bool = Field(True, json_schema_extra={"example": True})
+
+
+class ParetoApiRequest(BaseModel):
+    sample_count: int = Field(3, json_schema_extra={"example": 3})
+    collapse_threshold: float = Field(0.5, json_schema_extra={"example": 0.5})
+    editor_method: str = Field("grace", json_schema_extra={"example": "grace"})

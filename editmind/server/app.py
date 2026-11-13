@@ -37,6 +37,9 @@ from editmind.safety.unlearning import ConceptEraser
 from editmind.evaluation.factuality import SemanticEntropyEvaluator, FactualityReport
 from editmind.evaluation.reciprocal import FactualReciprocalAuditor
 from editmind.editors.steer import SteeringVectorEditor
+from editmind.routing import KnowledgeDomainRouter
+from editmind.continual import ContinualKnowledgeEditor, generate_svg_interference_matrix, ParetoPlasticityAuditor
+from editmind.data import load_counterfact_dataset
 from editmind.server.schemas import (
     EditApiRequest,
     TraceApiRequest,
@@ -50,6 +53,8 @@ from editmind.server.schemas import (
     ConceptUnlearnRequest,
     ReciprocalApiRequest,
     SteerApiRequest,
+    RouteApiRequest,
+    ParetoApiRequest,
 )
 
 app = FastAPI(
@@ -465,6 +470,35 @@ def perform_activation_steering(req: SteerApiRequest):
     )
     res = editor.edit(edit_req)
     return res.to_dict()
+
+
+_GLOBAL_ROUTER = KnowledgeDomainRouter()
+
+
+@app.post("/api/route")
+def route_knowledge_prompt(req: RouteApiRequest):
+    res = _GLOBAL_ROUTER.route_prompt(req.prompt)
+    return {
+        "domain": res.detected_domain,
+        "recommended_paradigm": res.recommended_paradigm,
+        "confidence": res.confidence,
+        "domain_scores": res.domain_scores,
+        "justification": res.justification,
+    }
+
+
+@app.post("/api/pareto")
+def audit_pareto_frontier(req: ParetoApiRequest):
+    wrapper = get_model_wrapper()
+    base_state = wrapper.get_state_dict()
+    editor = EditorRegistry.create(req.editor_method, model_wrapper=wrapper)
+    continual = ContinualKnowledgeEditor(editor)
+    dataset = load_counterfact_dataset(sample_count=req.sample_count)
+    trajectory = continual.run_sequential_stream(dataset.requests)
+    auditor = ParetoPlasticityAuditor(collapse_threshold=req.collapse_threshold)
+    report = auditor.audit_trajectory(trajectory, editor_name=req.editor_method)
+    wrapper.load_state_dict(base_state)
+    return report.to_dict()
 
 
 dashboard_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "dashboard")

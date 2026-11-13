@@ -25,6 +25,8 @@ from editmind.evaluation.factuality import SemanticEntropyEvaluator
 from editmind.evaluation.reciprocal import FactualReciprocalAuditor
 from editmind.models.localization import ConsensusLayerRanker
 from editmind.safety.unlearning import ConceptEraser
+from editmind.routing import KnowledgeDomainRouter
+from editmind.continual import ParetoPlasticityAuditor
 
 
 def main():
@@ -110,6 +112,17 @@ def main():
     steer_parser.add_argument("--ground-truth", type=str, default=None)
     steer_parser.add_argument("--layer", type=int, default=2)
     steer_parser.add_argument("--coeff", type=float, default=1.5)
+
+    # Command: route
+    route_parser = subparsers.add_parser("route", help="Route prompt to optimal knowledge domain and editing method")
+    route_parser.add_argument("--prompt", type=str, required=True, help="Knowledge edit assertion or query prompt")
+    route_parser.add_argument("--domain-hint", type=str, default=None, help="Optional prior domain hint")
+
+    # Command: pareto
+    pareto_parser = subparsers.add_parser("pareto", help="Audit plasticity-stability Pareto frontier on lifelong editing")
+    pareto_parser.add_argument("--editor", type=str, default="grace", choices=EditorRegistry.list_available())
+    pareto_parser.add_argument("--samples", type=int, default=3, help="Number of sequential editing steps")
+    pareto_parser.add_argument("--threshold", type=float, default=0.5, help="Collapse threshold for K_collapse")
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
@@ -326,6 +339,31 @@ def main():
         print(f"Post-Intervention    : {res.post_edit_target_prob:.4f}")
         print(f"Weight Delta Norm    : {res.details['weight_modification']} (Zero Weight Distortion)")
         print(f"Latency              : {res.execution_time_sec * 1000:.2f} ms")
+
+    elif args.command == "route":
+        router = KnowledgeDomainRouter()
+        res = router.route_prompt(args.prompt)
+        print(f"\n[EditMind Knowledge Domain Router]")
+        print(f"Domain               : {res.detected_domain.upper()}")
+        print(f"Recommended Paradigm : {res.recommended_paradigm.upper()}")
+        print(f"Confidence           : {res.confidence * 100:.1f}%")
+        print(f"Justification        : {res.justification}")
+
+    elif args.command == "pareto":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        editor = EditorRegistry.create(args.editor, model_wrapper=wrapper)
+        continual = ContinualKnowledgeEditor(editor)
+        ds = load_counterfact_dataset(sample_count=args.samples)
+        print(f"\n[EditMind] Auditing Plasticity-Stability Pareto Frontier on {len(ds)} steps via {args.editor.upper()}...")
+        trajectory = continual.run_sequential_stream(ds.requests)
+        auditor = ParetoPlasticityAuditor(collapse_threshold=args.threshold)
+        report = auditor.audit_trajectory(trajectory, editor_name=args.editor)
+        print(f"Editor               : {report.editor_name.upper()}")
+        print(f"Trajectory Length    : {report.trajectory_length} edits")
+        print(f"Collapse Step (K_col): {report.collapse_step if report.collapse_step else 'None (Stable)'}")
+        print(f"AURC (Area Under Ret): {report.aurc:.4f}")
+        print(f"Interference Dispers.: {report.interference_dispersion_index:.4f}")
+        print(f"Optimal Tradeoff Step: {report.optimal_operating_point}")
 
     elif args.command == "benchmark":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
