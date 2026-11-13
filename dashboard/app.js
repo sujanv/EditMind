@@ -684,4 +684,160 @@ document.addEventListener("DOMContentLoaded", () => {
       resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error auditing Pareto frontier: ${err.message}</p>`;
     }
   });
+
+  // Apply RefEdit (Closed-Loop) Button
+  document.getElementById("btn-run-refedit").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const target = document.getElementById("target-input").value;
+    const groundTruth = document.getElementById("ground-truth-input").value;
+    const subject = document.getElementById("subject-input").value;
+    const resultsContainer = document.getElementById("closedloop-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Executing closed-loop residual feedback iterations...</p>`;
+
+    try {
+      const res = await fetch("/api/refedit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          target_new: target,
+          ground_truth: groundTruth,
+          subject,
+          max_feedback_steps: 4,
+          target_margin: 0.25,
+          target_layer: 2
+        })
+      });
+      const data = await res.json();
+
+      let trajRows = data.details.trajectory.map(t => `
+        <tr>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">Step ${t.step}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${t.p_target.toFixed(4)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${t.p_old.toFixed(4)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244; font-weight:bold; color:#a6e3a1;">${t.margin.toFixed(4)}</td>
+        </tr>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>⚡ RefEdit Closed-Loop Convergence</h4>
+          <p><strong>Status:</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.success ? 'CONVERGED' : 'TERMINATED'}</span> &bull; <strong>Steps:</strong> ${data.details.feedback_steps_executed} &bull; <strong>Weight Delta ||W||:</strong> ${data.delta_weight_norm.toFixed(4)}</p>
+          <p><strong>Target Probability Shift:</strong> ${data.pre_edit_target_prob.toFixed(4)} &rarr; <span style="color:#a6e3a1; font-weight:bold;">${data.post_edit_target_prob.toFixed(4)}</span></p>
+          <p><strong>Initial Margin:</strong> ${data.details.initial_margin.toFixed(4)} &rarr; <strong>Final Margin:</strong> <span style="color:#89b4fa; font-weight:bold;">${data.details.final_margin.toFixed(4)}</span></p>
+          <table style="width:100%; font-size:12px; border-collapse:collapse; margin-top:10px; text-align:left;">
+            <thead>
+              <tr style="color:#a6adc8; border-bottom:1px solid #45475a;">
+                <th style="padding:4px 8px;">Step</th>
+                <th style="padding:4px 8px;">P(Target)</th>
+                <th style="padding:4px 8px;">P(Old)</th>
+                <th style="padding:4px 8px;">Margin</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${trajRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error executing RefEdit: ${err.message}</p>`;
+    }
+  });
+
+  // Joint Multi-Concept Erasure Button
+  document.getElementById("btn-run-multiconcept").addEventListener("click", async () => {
+    const resultsContainer = document.getElementById("closedloop-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Computing joint orthogonal null-space SVD projection across multiple concepts...</p>`;
+
+    try {
+      const res = await fetch("/api/multiconcept-unlearn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          concepts: [
+            { name: "credentials", forget_prompts: ["The root password is", "The classified API token was"] },
+            { name: "pii_ssn", forget_prompts: ["The social security number of John is", "The taxpayer ID is"] }
+          ],
+          retain_prompts: [
+            "The capital of France is Paris",
+            "Shakespeare was an English writer",
+            "Water boils at 100 degrees Celsius"
+          ],
+          target_layers: [2],
+          max_subspace_rank: 3
+        })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🧹 Joint Multi-Concept Subspace Erasure</h4>
+          <p><strong>Erased Concepts:</strong> <span style="background:#89b4fa; color:#11111b; padding:2px 8px; border-radius:4px; font-weight:bold;">${data.concept_names.join(', ')}</span> &bull; <strong>Subspace Rank:</strong> ${data.subspace_rank}</p>
+          <p><strong>Subspace Orthogonality Divergence (SOD):</strong> ${data.subspace_orthogonality_divergence.toFixed(4)} &bull; <strong>Joint Efficiency (JUE):</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.joint_unlearning_efficiency.toFixed(4)}</span></p>
+          <p><strong>Benign Utility Retention:</strong> ${(data.utility_retention_score * 100).toFixed(1)}%</p>
+          <p style="font-size:12px; color:#a6adc8; margin-top:8px;">Leakage Post-Erasure: credentials=${(data.post_leakage_scores.credentials * 100).toFixed(1)}%, pii=${(data.post_leakage_scores.pii_ssn * 100).toFixed(1)}% (Chance baseline achieved)</p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error executing joint concept erasure: ${err.message}</p>`;
+    }
+  });
+
+  // Generalization Stress-Test Button
+  document.getElementById("btn-run-generalization").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const target = document.getElementById("target-input").value;
+    const groundTruth = document.getElementById("ground-truth-input").value;
+    const subject = document.getElementById("subject-input").value;
+    const resultsContainer = document.getElementById("closedloop-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Probing perturbed counterfactual expressions and distractor prefixes...</p>`;
+
+    try {
+      const res = await fetch("/api/generalization-audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_prompt: prompt,
+          target_new: target,
+          ground_truth: groundTruth,
+          subject
+        })
+      });
+      const data = await res.json();
+
+      let probeRows = data.probes.slice(0, 5).map(p => `
+        <tr>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;"><code style="font-size:11px;">"${p.prompt}"</code></td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.category}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.target_prob.toFixed(4)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.passed ? '✅' : '❌'}</td>
+        </tr>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🎯 Counterfactual Generalization Audit</h4>
+          <p><strong>Base Prompt:</strong> "${data.base_prompt}" &rarr; <strong>Target:</strong> "${data.target_new}"</p>
+          <p><strong>Generalization Pass Rate:</strong> <span style="color:#a6e3a1; font-weight:bold;">${(data.generalization_pass_rate * 100).toFixed(1)}%</span> (${data.passed_perturbations}/${data.total_perturbations})</p>
+          <p><strong>SGRI Robustness Index:</strong> <span style="color:#89b4fa; font-weight:bold;">${data.semantic_generalization_robustness_index.toFixed(4)}</span> &bull; <strong>Prompt Sensitivity Variance (PSV):</strong> ${data.prompt_sensitivity_variance.toFixed(6)}</p>
+          <table style="width:100%; font-size:12px; border-collapse:collapse; margin-top:10px; text-align:left;">
+            <thead>
+              <tr style="color:#a6adc8; border-bottom:1px solid #45475a;">
+                <th style="padding:4px 8px;">Perturbed Probe</th>
+                <th style="padding:4px 8px;">Category</th>
+                <th style="padding:4px 8px;">P(Target)</th>
+                <th style="padding:4px 8px;">Pass</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${probeRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error auditing generalization: ${err.message}</p>`;
+    }
+  });
 });

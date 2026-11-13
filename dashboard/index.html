@@ -54,6 +54,7 @@
               <option value="steer">Steer (Activation Steering Vector - ActAdd)</option>
               <option value="batch_alphaedit">Batch-AlphaEdit (Batched Null-Space Projection)</option>
               <option value="caedit">CA-Edit (Cross-Attention Knowledge Modification)</option>
+              <option value="refedit">RefEdit (Closed-Loop Residual Feedback Editing)</option>
             </select>
           </div>
 
@@ -110,6 +111,7 @@
           <button class="tab-btn" data-tab="tab-consensus">🧬 Consensus &amp; Concept</button>
           <button class="tab-btn" data-tab="tab-reciprocal">🔄 Reciprocal &amp; Steer</button>
           <button class="tab-btn" data-tab="tab-router">🌐 Router &amp; Pareto</button>
+          <button class="tab-btn" data-tab="tab-closedloop">🔬 Closed-Loop &amp; Multi-Concept</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -226,6 +228,20 @@
           </div>
 
           <div id="router-results" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Tab 11: Closed-Loop RefEdit & Multi-Concept Subspace Erasure -->
+        <div class="tab-pane" id="tab-closedloop">
+          <h3>🔬 Closed-Loop Feedback &amp; Joint Subspace Unlearning</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Iteratively eliminate post-edit residual errors via closed-loop feedback probing (RefEdit), simultaneously scrub multiple intersecting sensitive concepts via orthogonal null-space SVD projection (Joint Subspace Erasure), and stress-test counterfactual generalization (SGRI).</p>
+          
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+            <button type="button" id="btn-run-refedit" class="btn btn-primary">⚡ Apply RefEdit (Closed-Loop)</button>
+            <button type="button" id="btn-run-multiconcept" class="btn btn-accent">🧹 Joint Multi-Concept Erasure</button>
+            <button type="button" id="btn-run-generalization" class="btn btn-secondary">🎯 Generalization Stress-Test</button>
+          </div>
+
+          <div id="closedloop-results" style="margin-top:12px;"></div>
         </div>
       </section>
     </main>

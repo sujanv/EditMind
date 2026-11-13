@@ -34,7 +34,8 @@ As Large Language Models (LLMs) scale, retraining or full fine-tuning to update 
 9. **Representation Steering**: **Steer** (Activation Addition / Representation Engineering, $\Delta W = 0$)
 10. **Batched Null-Space**: **Batch-AlphaEdit** (Multi-Fact Orthogonal Projection via Block SVD)
 11. **Cross-Attention Editing**: **CA-Edit** (Rank-1 Attention Value Projection Modification on $c_{\text{proj}}$)
-12. **Constrained Baselines**: **FT-L** ($L_\infty$-bounded Fine-Tuning) and **LoRA-Edit** (Low-Rank Parameter Adaptation)
+12. **Closed-Loop Feedback**: **RefEdit** (Iterative Residual Error Feedback Probing & Damped Correction)
+13. **Constrained Baselines**: **FT-L** ($L_\infty$-bounded Fine-Tuning) and **LoRA-Edit** (Low-Rank Parameter Adaptation)
 
 ---
 
@@ -54,6 +55,7 @@ As Large Language Models (LLMs) scale, retraining or full fine-tuning to update 
 | **Dynamic Gating** | **K-MoE** | Expert Adapter ($B_i \times A_i$) | **Very High** | Tens of Thousands | Dynamic router gating $G(x)$ dispatching edits to domain-isolated expert adapters |
 | **Activation Steer**| **Steer** | None ($\Delta W = 0$) | **100% Guaranteed** | High | Dynamic contrastive activation steering vector ($+\alpha \cdot v_{\text{steer}}$) on residual stream |
 | **Attention Projection** | **CA-Edit** | Rank-1 Attention ($c_{\text{proj}}$) | Very High | Single / Few | Closed-form rank-1 projection on self-attention output projection $W_{\text{attn}}$ |
+| **Closed-Loop Feedback** | **RefEdit** | Damped Rank-1 Iteration | High | Single / Few | Probes post-edit forward pass and computes residual error corrections $\Delta W^{(t)}$ |
 | **Constrained FT** | **FT-L** | Gradient Descent | Low | Degrades | $L_\infty / L_2$ norm-bounded backpropagation |
 | **Parameter-Efficient**| **LoRA-Edit** | Low-rank adapter ($B \times A$) | Moderate | Medium | Target MLP LoRA adapter training with parameter merge |
 
@@ -415,9 +417,54 @@ editmind pareto --editor grace --samples 4 --threshold 0.5
 
 ---
 
+## 🔁 Closed-Loop Residual Error Feedback Editing (RefEdit)
+
+Single-pass open-loop methods (such as ROME and MEMIT) solve for target representations at intermediate layers, but downstream non-linear transformations and layer normalizations cause final-layer logit error $\epsilon_{\text{res}}$. **RefEdit** introduces closed-loop iterative feedback:
+- **Forward Probe Verification**: Probes output logits after applying initial weight update $\Delta W^{(0)}$.
+- **Residual Error Correction**: Evaluates target logit deficit and computes damped residual increment $\delta W^{(t)} = \frac{\Delta v^{(t)} (k^*)^T}{\|k^*\|_2^2 + \lambda}$.
+- **Adaptive Convergence**: Continues damped feedback iterations until target margin $P(y_{\text{new}}) - P(y_{\text{old}}) \ge \gamma_{\text{margin}}$ is satisfied, recording the full convergence trajectory.
+
+```bash
+# Apply closed-loop RefEdit via CLI
+editmind refedit --prompt "The Eiffel Tower is in" --target "Rome" --steps 4 --layer 2
+```
+
+---
+
+## 🧹 Multi-Concept Orthogonal Subspace Decoupling (Joint Subspace Erasure)
+
+When simultaneously unlearning multiple intersecting sensitive concepts (e.g. root credentials, PII/SSNs, toxic content), sequential unlearning causes subspace interference and destroys benign utility. **JointSubspaceEraser**:
+- **Joint Sensitive Matrix**: Stacks activation direction vectors across all $M$ target concepts into a joint matrix $V_{\text{joint}} \in \mathbb{R}^{d \times K}$.
+- **Simultaneous Orthogonal Null-Space Projector**: Performs SVD to isolate the shared sensitive span $U_{\text{joint}}$ and computes $P_{\text{joint}} = I - U_{\text{joint}} U_{\text{joint}}^T$.
+- **Subspace Orthogonality Divergence (SOD)**: Quantifies cross-concept interference and angle divergence $\frac{1}{K_i K_j} \sum |\cos(u_i, u_j)|$.
+- **Joint Unlearning Efficiency (JUE)**: Evaluates simultaneous concept erasure completeness against benign retain set preservation.
+
+```bash
+# Execute joint multi-concept subspace erasure via CLI
+editmind multiconcept --layer 2
+```
+
+---
+
+## 🎯 Counterfactual Generalization Stress-Tester
+
+Audits whether an applied edit generalizes across syntactic and contextual reformulations or merely memorized the surface tokens:
+- **Perturbation Generation**: Generates distractor prefixes ("According to confirmed records,"), syntactic rephrasings, conversational framing, and grammatical inversions.
+- **Semantic Generalization Robustness Index (SGRI)**: Measures relative retention of target probability across all perturbations: $\text{SGRI} = \frac{\mathbb{E}_{p \in \mathcal{P}}[P_{\text{target}}(p)]}{P_{\text{target}}(p_{\text{base}})}$.
+- **Prompt Sensitivity Variance (PSV)**: Measures variance in target confidence across diverse prompt wordings ($\sigma^2_{\text{prob}}$).
+
+```bash
+# Stress-test generalization robustness via CLI
+editmind generalization --prompt "The capital of France is" --target "Paris"
+```
+
+---
+
 ## ⚡ Go Microservice Gateway
 
 A high-performance Golang service located in [`gateway/`](gateway/):
+- **Sliding-Window Rate Limiting**: Fine-grained sliding-window counter tracking request timestamps across dynamic intervals with zero lock contention (`GET /api/gateway/sliding/stats`).
+- **Client Reputation & Adaptive Quarantine**: Automatic client score tracking ($0.0 - 100.0$). Penalizes abusive clients upon rate limit violations; automatically quarantines malicious clients with HTTP 403 Forbidden (`GET /api/gateway/clients/stats`, `POST /api/gateway/clients/reset`).
 - **Dual-Tier Priority Traffic Queuing**: Dedicated fast path separating `high` priority traffic (e.g., emergency privacy unlearning, SLA overrides) from `standard` traffic (`POST /api/gateway/priority/query`). High priority bypasses standard token-bucket throttling with microsecond dispatch.
 - **Adaptive Circuit Breaker**: 3-state circuit breaker (`CLOSED`, `OPEN`, `HALF_OPEN`) preventing cascading cluster overload by shedding excess queries with HTTP 503 (`/api/gateway/circuit/status`, `/api/gateway/circuit/reset`, `/api/gateway/circuit/trip`).
 - **Distributed Leader Election & Term Tracking**: Raft-like leader coordinator election for serializing cluster edit ordering (`POST /api/gateway/cluster/elect`).
@@ -448,7 +495,7 @@ go build -o editmind-gateway main.go
 
 Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 - **Causal Tracing**: SVG layer $\times$ token heatmap identifying factual memory locations.
-- **Probability Shift**: Side-by-side probability bars for target and ground truth across ROME, MEMIT, PMET, AlphaEdit, GRACE, IKE, Q-Edit, K-MoE, Steer, Batch-AlphaEdit, and CA-Edit.
+- **Probability Shift**: Side-by-side probability bars for target and ground truth across ROME, MEMIT, PMET, AlphaEdit, GRACE, IKE, Q-Edit, K-MoE, Steer, Batch-AlphaEdit, CA-Edit, and RefEdit.
 - **Comparative Radar**: 5-axis polygon visualizer comparing all paradigms.
 - **Continual Matrix**: Live $T \times T$ interference heatmap tracking sequential memory retention.
 - **Safety Sandbox**: Machine unlearning and knowledge contradiction testbed.
@@ -457,6 +504,7 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 - **Consensus & Concept Panel**: Multi-criterion consensus layer localization and linear concept erasure (RLACE) auditor.
 - **Reciprocal & Steer Panel**: Bidirectional Reversal Curse auditor and live ActAdd steering vector coefficient tuner.
 - **Router & Pareto Frontier Panel**: Semantic domain classification radar, paradigm dispatcher, and lifelong Plasticity-Stability Pareto frontier curves.
+- **Closed-Loop & Multi-Concept Panel**: RefEdit convergence trajectory viewer, Joint Subspace multi-concept erasure auditor, and counterfactual generalization stress-tester.
 
 ---
 
@@ -464,10 +512,10 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 
 Run the automated test suite across Python 3.10, 3.11, and 3.12:
 ```bash
-# Python Unit Tests (88 automated tests)
+# Python Unit Tests (97 automated tests)
 pytest tests/ -v
 
-# Go Gateway Tests (12 unit & benchmark suites)
+# Go Gateway Tests (14 unit & benchmark suites)
 cd gateway && go test -v ./...
 ```
 
