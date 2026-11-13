@@ -592,4 +592,96 @@ document.addEventListener("DOMContentLoaded", () => {
       resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error injecting steering vector: ${err.message}</p>`;
     }
   });
+
+  // Route Current Prompt Button
+  document.getElementById("btn-run-route").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const resultsContainer = document.getElementById("router-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Classifying prompt across semantic domain knowledge signatures...</p>`;
+
+    try {
+      const res = await fetch("/api/route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await res.json();
+
+      let scoresHtml = Object.entries(data.domain_scores).map(([d, s]) => `
+        <span style="display:inline-block; margin:2px 6px; padding:2px 8px; background:#313244; border-radius:4px; font-size:12px;">
+          ${d}: <strong>${(s * 100).toFixed(0)}%</strong>
+        </span>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🧭 Domain Classification &amp; Paradigm Dispatch</h4>
+          <p><strong>Prompt:</strong> "${prompt}"</p>
+          <p><strong>Detected Domain:</strong> <span style="background:#89b4fa; color:#11111b; padding:2px 8px; border-radius:4px; font-weight:bold;">${data.domain.toUpperCase()}</span> &bull; <strong>Confidence:</strong> ${(data.confidence * 100).toFixed(1)}%</p>
+          <p><strong>Recommended Paradigm:</strong> <span style="background:#a6e3a1; color:#11111b; padding:2px 8px; border-radius:4px; font-weight:bold;">${data.recommended_paradigm.toUpperCase()}</span></p>
+          <p style="font-size:12px; color:#cdd6f4; margin:8px 0;">${data.justification}</p>
+          <div style="margin-top:10px;">
+            <p style="font-size:12px; color:#a6adc8; margin-bottom:4px;">Domain Affinity Scores:</p>
+            ${scoresHtml}
+          </div>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error routing prompt: ${err.message}</p>`;
+    }
+  });
+
+  // Audit Pareto Frontier Button
+  document.getElementById("btn-run-pareto").addEventListener("click", async () => {
+    const method = document.getElementById("method-select").value;
+    const resultsContainer = document.getElementById("router-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Computing plasticity-stability Pareto trade-off curve and collapse boundaries...</p>`;
+
+    try {
+      const res = await fetch("/api/pareto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sample_count: 3,
+          collapse_threshold: 0.5,
+          editor_method: method
+        })
+      });
+      const data = await res.json();
+
+      let pointRows = data.pareto_points.map(p => `
+        <tr>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">Step ${p.step}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.instantaneous_efficacy.toFixed(3)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.cumulative_retention.toFixed(3)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244; font-weight:bold; color:#a6e3a1;">${p.harmonic_tradeoff.toFixed(3)}</td>
+        </tr>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>📈 Plasticity-Stability Pareto Frontier</h4>
+          <p><strong>Editor:</strong> <code>${data.editor_name.toUpperCase()}</code> &bull; <strong>Trajectory Length:</strong> ${data.trajectory_length} edits</p>
+          <p><strong>Collapse Step (K<sub>collapse</sub>):</strong> ${data.collapse_step ? '<span style="color:#f38ba8; font-weight:bold;">Step ' + data.collapse_step + '</span>' : '<span style="color:#a6e3a1; font-weight:bold;">None (Stable)</span>'}</p>
+          <p><strong>Area Under Retention Curve (AURC):</strong> <span style="color:#89b4fa; font-weight:bold;">${data.aurc.toFixed(4)}</span> &bull; <strong>Interference Dispersion:</strong> ${data.interference_dispersion_index.toFixed(4)}</p>
+          <p><strong>Optimal Operating Point:</strong> Step ${data.optimal_operating_point}</p>
+          <table style="width:100%; font-size:12px; border-collapse:collapse; margin-top:10px; text-align:left;">
+            <thead>
+              <tr style="color:#a6adc8; border-bottom:1px solid #45475a;">
+                <th style="padding:4px 8px;">Step</th>
+                <th style="padding:4px 8px;">Plasticity (Eff<sub>t</sub>)</th>
+                <th style="padding:4px 8px;">Stability (Ret<sub>t</sub>)</th>
+                <th style="padding:4px 8px;">F1 Tradeoff</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pointRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error auditing Pareto frontier: ${err.message}</p>`;
+    }
+  });
 });

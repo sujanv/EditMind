@@ -33,7 +33,8 @@ As Large Language Models (LLMs) scale, retraining or full fine-tuning to update 
 8. **Knowledge Mixture-of-Experts**: **K-MoE** (Dynamic Gated Adapter Routing for Lifelong Zero-Interference Editing)
 9. **Representation Steering**: **Steer** (Activation Addition / Representation Engineering, $\Delta W = 0$)
 10. **Batched Null-Space**: **Batch-AlphaEdit** (Multi-Fact Orthogonal Projection via Block SVD)
-11. **Constrained Baselines**: **FT-L** ($L_\infty$-bounded Fine-Tuning) and **LoRA-Edit** (Low-Rank Parameter Adaptation)
+11. **Cross-Attention Editing**: **CA-Edit** (Rank-1 Attention Value Projection Modification on $c_{\text{proj}}$)
+12. **Constrained Baselines**: **FT-L** ($L_\infty$-bounded Fine-Tuning) and **LoRA-Edit** (Low-Rank Parameter Adaptation)
 
 ---
 
@@ -52,6 +53,7 @@ As Large Language Models (LLMs) scale, retraining or full fine-tuning to update 
 | **Quantized Low-Bit**| **Q-Edit** | Low-rank adapter ($B \times A$) | High | Medium | 4-bit/8-bit weight quantization freeze with trainable low-rank bypass |
 | **Dynamic Gating** | **K-MoE** | Expert Adapter ($B_i \times A_i$) | **Very High** | Tens of Thousands | Dynamic router gating $G(x)$ dispatching edits to domain-isolated expert adapters |
 | **Activation Steer**| **Steer** | None ($\Delta W = 0$) | **100% Guaranteed** | High | Dynamic contrastive activation steering vector ($+\alpha \cdot v_{\text{steer}}$) on residual stream |
+| **Attention Projection** | **CA-Edit** | Rank-1 Attention ($c_{\text{proj}}$) | Very High | Single / Few | Closed-form rank-1 projection on self-attention output projection $W_{\text{attn}}$ |
 | **Constrained FT** | **FT-L** | Gradient Descent | Low | Degrades | $L_\infty / L_2$ norm-bounded backpropagation |
 | **Parameter-Efficient**| **LoRA-Edit** | Low-rank adapter ($B \times A$) | Moderate | Medium | Target MLP LoRA adapter training with parameter merge |
 
@@ -372,9 +374,52 @@ editmind steer --prompt "The capital of France is" --target "Rome" --coeff 1.5 -
 
 ---
 
+## 🌐 Dynamic Knowledge Domain Router & Semantic Dispatcher
+
+In production pipelines with mixed incoming assertions, applying a single knowledge-editing paradigm across all requests degrades locality and throughput. The **Knowledge Domain Router** (`KnowledgeDomainRouter`) classifies prompts and routes them to mathematically optimal editors:
+
+- **Geography / Entity Localization**: Dispatched to **ROME** or **MEMIT** (Rank-1/Rank-$k$ MLP projection).
+- **Scientific / Technical Laws**: Dispatched to **AlphaEdit** (null-space projection preserving invariant physics/algorithmic activations).
+- **Privacy / PII Erasure**: Dispatched to **GRACE** or **MachineUnlearner** (localized $\epsilon$-ball interception and safety auditing).
+- **Transient / Hypothetical Scenarios**: Dispatched to **Steer** (zero-weight modification activation addition).
+- **Biographic / Corporate Facts**: Dispatched to **PMET** (momentum-damped dual key-value updates).
+
+```bash
+# Classify and route prompt via CLI
+editmind route --prompt "The capital of France is Paris"
+```
+
+---
+
+## 🔬 Cross-Attention Knowledge Editing (CA-Edit)
+
+While ROME and MEMIT target feedforward MLP layers ($W_{\text{out}}$) as associative memory key-value stores, relational facts are also dynamically bound in multi-head self-attention projection weights ($c_{\text{proj}}$):
+- **Attention Value Modification**: Extracts key representation $k_{\text{attn}} \in \mathbb{R}^d$ entering the self-attention output projection at the subject token index.
+- **Closed-Form Rank-1 Update**: Solves $\Delta W_{\text{attn}} = \frac{(v_* - W_{\text{attn}} k_{\text{attn}}) k_{\text{attn}}^T}{\|k_{\text{attn}}\|_2^2 + \lambda_{\text{reg}}}$.
+- **Attention Subspace Surgicality**: Intervenes purely on multi-head contextual attention routing without altering feedforward representation tables.
+
+---
+
+## 📈 Plasticity-Stability Pareto Frontier Analyzer
+
+Lifelong sequential knowledge editing exhibits a fundamental trade-off between **Plasticity** (ability to assimilate incoming facts) and **Stability** (preservation of prior parametric knowledge). The **Pareto Frontier Auditor** (`ParetoPlasticityAuditor`) computes:
+- **Collapse Step ($K_{\text{collapse}}$)**: The critical editing iteration where retention drops below an operational threshold (e.g., 50%).
+- **Area Under Retention Curve (AURC)**: Normalized integral of cumulative retention over the edit sequence ($\text{AURC} \in [0, 1]$).
+- **Interference Dispersion Index (IDI)**: Variance of retention degradation across individual memories ($\sigma^2_{\text{ret}}$).
+- **Optimal Operating Point**: Step $t^*$ maximizing the harmonic trade-off $F_1 = \frac{2 \cdot P_t \cdot S_t}{P_t + S_t + \epsilon}$.
+
+```bash
+# Audit lifelong Pareto frontier via CLI
+editmind pareto --editor grace --samples 4 --threshold 0.5
+```
+
+---
+
 ## ⚡ Go Microservice Gateway
 
 A high-performance Golang service located in [`gateway/`](gateway/):
+- **Dual-Tier Priority Traffic Queuing**: Dedicated fast path separating `high` priority traffic (e.g., emergency privacy unlearning, SLA overrides) from `standard` traffic (`POST /api/gateway/priority/query`). High priority bypasses standard token-bucket throttling with microsecond dispatch.
+- **Adaptive Circuit Breaker**: 3-state circuit breaker (`CLOSED`, `OPEN`, `HALF_OPEN`) preventing cascading cluster overload by shedding excess queries with HTTP 503 (`/api/gateway/circuit/status`, `/api/gateway/circuit/reset`, `/api/gateway/circuit/trip`).
 - **Distributed Leader Election & Term Tracking**: Raft-like leader coordinator election for serializing cluster edit ordering (`POST /api/gateway/cluster/elect`).
 - **Gossip Heartbeat Protocol**: Peer liveness heartbeats with automatic inactive peer pruning (`POST /api/gateway/cluster/heartbeat`).
 - **Cluster State & Watermark**: Reports active topology, leader ID, term, and WAL commit index (`GET /api/gateway/cluster/state`).
@@ -387,7 +432,7 @@ A high-performance Golang service located in [`gateway/`](gateway/):
 - **Rolling Latency Percentiles**: Measures real-time execution performance ($p50, p90, p99$).
 - **Semantic Vector Similarity Cache**: Built-in cosine similarity matching ($\ge 0.85$) on vector embeddings.
 - **Token-Bucket Rate Limiter**: Built-in burst handling (100 burst, 50 req/sec refill).
-- **Prometheus Metrics**: Exposes `/metrics` endpoint with request counters and latency telemetry.
+- **Prometheus Metrics**: Exposes `/metrics` endpoint with request counters, priority queue splits, and latency telemetry.
 
 ```bash
 cd gateway
@@ -403,7 +448,7 @@ go build -o editmind-gateway main.go
 
 Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 - **Causal Tracing**: SVG layer $\times$ token heatmap identifying factual memory locations.
-- **Probability Shift**: Side-by-side probability bars for target and ground truth across ROME, MEMIT, PMET, AlphaEdit, GRACE, IKE, Q-Edit, K-MoE, Steer, and Batch-AlphaEdit.
+- **Probability Shift**: Side-by-side probability bars for target and ground truth across ROME, MEMIT, PMET, AlphaEdit, GRACE, IKE, Q-Edit, K-MoE, Steer, Batch-AlphaEdit, and CA-Edit.
 - **Comparative Radar**: 5-axis polygon visualizer comparing all paradigms.
 - **Continual Matrix**: Live $T \times T$ interference heatmap tracking sequential memory retention.
 - **Safety Sandbox**: Machine unlearning and knowledge contradiction testbed.
@@ -411,6 +456,7 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 - **Factuality & Resolution Panel**: Stochastic semantic entropy evaluator and automated conflict resolution testbed.
 - **Consensus & Concept Panel**: Multi-criterion consensus layer localization and linear concept erasure (RLACE) auditor.
 - **Reciprocal & Steer Panel**: Bidirectional Reversal Curse auditor and live ActAdd steering vector coefficient tuner.
+- **Router & Pareto Frontier Panel**: Semantic domain classification radar, paradigm dispatcher, and lifelong Plasticity-Stability Pareto frontier curves.
 
 ---
 
@@ -418,10 +464,10 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 
 Run the automated test suite across Python 3.10, 3.11, and 3.12:
 ```bash
-# Python Unit Tests (78 automated tests)
+# Python Unit Tests (88 automated tests)
 pytest tests/ -v
 
-# Go Gateway Tests (10 unit & benchmark suites)
+# Go Gateway Tests (12 unit & benchmark suites)
 cd gateway && go test -v ./...
 ```
 

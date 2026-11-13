@@ -53,6 +53,7 @@
               <option value="kmoe">K-MoE (Knowledge Mixture of Experts)</option>
               <option value="steer">Steer (Activation Steering Vector - ActAdd)</option>
               <option value="batch_alphaedit">Batch-AlphaEdit (Batched Null-Space Projection)</option>
+              <option value="caedit">CA-Edit (Cross-Attention Knowledge Modification)</option>
             </select>
           </div>
 
@@ -108,6 +109,7 @@
           <button class="tab-btn" data-tab="tab-factuality">🎯 Factuality &amp; Resolution</button>
           <button class="tab-btn" data-tab="tab-consensus">🧬 Consensus &amp; Concept</button>
           <button class="tab-btn" data-tab="tab-reciprocal">🔄 Reciprocal &amp; Steer</button>
+          <button class="tab-btn" data-tab="tab-router">🌐 Router &amp; Pareto</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -211,6 +213,19 @@
           </div>
 
           <div id="reciprocal-results" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Tab 10: Knowledge Domain Router & Pareto Frontier -->
+        <div class="tab-pane" id="tab-router">
+          <h3>🌐 Knowledge Domain Router &amp; Pareto Frontier Auditor</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Automatically classify assertions into semantic domains (Geography, Science/Tech, Privacy/PII, Transient Overrides) to dispatch to the optimal editing paradigm, and evaluate lifelong plasticity-stability trade-offs (Collapse Step, AURC, and Interference Dispersion).</p>
+          
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+            <button type="button" id="btn-run-route" class="btn btn-secondary">🧭 Route Current Prompt</button>
+            <button type="button" id="btn-run-pareto" class="btn btn-accent">📈 Audit Pareto Frontier</button>
+          </div>
+
+          <div id="router-results" style="margin-top:12px;"></div>
         </div>
       </section>
     </main>
