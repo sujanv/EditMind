@@ -36,7 +36,10 @@ from editmind.models.localization import ConsensusLayerRanker
 from editmind.safety.unlearning import ConceptEraser
 from editmind.evaluation.factuality import SemanticEntropyEvaluator, FactualityReport
 from editmind.evaluation.reciprocal import FactualReciprocalAuditor
+from editmind.evaluation.generalization import GeneralizationAuditor
 from editmind.editors.steer import SteeringVectorEditor
+from editmind.editors.refedit import ResidualErrorFeedbackEditor
+from editmind.safety.multiconcept import JointSubspaceEraser, ConceptDefinition
 from editmind.routing import KnowledgeDomainRouter
 from editmind.continual import ContinualKnowledgeEditor, generate_svg_interference_matrix, ParetoPlasticityAuditor
 from editmind.data import load_counterfact_dataset
@@ -55,6 +58,9 @@ from editmind.server.schemas import (
     SteerApiRequest,
     RouteApiRequest,
     ParetoApiRequest,
+    RefEditApiRequest,
+    MultiConceptUnlearnRequest,
+    GeneralizationAuditRequest,
 )
 
 app = FastAPI(
@@ -498,6 +504,56 @@ def audit_pareto_frontier(req: ParetoApiRequest):
     auditor = ParetoPlasticityAuditor(collapse_threshold=req.collapse_threshold)
     report = auditor.audit_trajectory(trajectory, editor_name=req.editor_method)
     wrapper.load_state_dict(base_state)
+    return report.to_dict()
+
+
+@app.post("/api/refedit")
+def perform_refedit(req: RefEditApiRequest):
+    wrapper = get_model_wrapper()
+    editor = EditorRegistry.create(
+        "refedit",
+        model_wrapper=wrapper,
+        target_layer=req.target_layer,
+        max_feedback_steps=req.max_feedback_steps,
+        target_margin=req.target_margin,
+    )
+    edit_req = EditRequest(
+        prompt=req.prompt,
+        target_new=req.target_new,
+        ground_truth=req.ground_truth,
+        subject=req.subject,
+    )
+    res = editor.edit(edit_req)
+    return res.to_dict()
+
+
+@app.post("/api/multiconcept-unlearn")
+def perform_multiconcept_unlearn(req: MultiConceptUnlearnRequest):
+    wrapper = get_model_wrapper()
+    eraser = JointSubspaceEraser(wrapper)
+    concept_defs = [
+        ConceptDefinition(name=c["name"], forget_prompts=c["forget_prompts"])
+        for c in req.concepts
+    ]
+    report = eraser.erase_multiple_concepts(
+        concepts=concept_defs,
+        retain_prompts=req.retain_prompts,
+        target_layers=req.target_layers,
+        max_subspace_rank=req.max_subspace_rank,
+    )
+    return report.to_dict()
+
+
+@app.post("/api/generalization-audit")
+def perform_generalization_audit(req: GeneralizationAuditRequest):
+    wrapper = get_model_wrapper()
+    auditor = GeneralizationAuditor(wrapper)
+    report = auditor.audit_generalization(
+        base_prompt=req.base_prompt,
+        target_new=req.target_new,
+        ground_truth=req.ground_truth,
+        subject=req.subject,
+    )
     return report.to_dict()
 
 

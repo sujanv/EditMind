@@ -278,4 +278,50 @@ def test_pareto_endpoint():
     assert len(data["pareto_points"]) == 2
 
 
+def test_refedit_endpoint():
+    res = client.post("/api/refedit", json={
+        "prompt": "The Eiffel Tower is in",
+        "target_new": "Rome",
+        "ground_truth": "Paris",
+        "subject": "Eiffel Tower",
+        "max_feedback_steps": 2,
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["editor_name"] == "refedit"
+    assert "feedback_steps_executed" in data["details"]
+    assert "final_margin" in data["details"]
+
+
+def test_multiconcept_endpoint():
+    res = client.post("/api/multiconcept-unlearn", json={
+        "concepts": [
+            {"name": "credentials", "forget_prompts": ["The root password is"]},
+            {"name": "ssn", "forget_prompts": ["The SSN is"]},
+        ],
+        "retain_prompts": ["The capital of France is Paris"],
+        "target_layers": [2],
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "credentials" in data["concept_names"]
+    assert "subspace_orthogonality_divergence" in data
+    assert "utility_retention_score" in data
+
+
+def test_generalization_endpoint():
+    res = client.post("/api/generalization-audit", json={
+        "base_prompt": "The capital of France is",
+        "target_new": "Paris",
+        "ground_truth": "Rome",
+        "subject": "France",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "generalization_pass_rate" in data
+    assert "semantic_generalization_robustness_index" in data
+    assert len(data["probes"]) > 0
+
+
+
 

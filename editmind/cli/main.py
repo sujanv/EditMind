@@ -25,6 +25,9 @@ from editmind.evaluation.factuality import SemanticEntropyEvaluator
 from editmind.evaluation.reciprocal import FactualReciprocalAuditor
 from editmind.models.localization import ConsensusLayerRanker
 from editmind.safety.unlearning import ConceptEraser
+from editmind.safety.multiconcept import JointSubspaceEraser, ConceptDefinition
+from editmind.evaluation.generalization import GeneralizationAuditor
+from editmind.editors.refedit import ResidualErrorFeedbackEditor
 from editmind.routing import KnowledgeDomainRouter
 from editmind.continual import ParetoPlasticityAuditor
 
@@ -123,6 +126,26 @@ def main():
     pareto_parser.add_argument("--editor", type=str, default="grace", choices=EditorRegistry.list_available())
     pareto_parser.add_argument("--samples", type=int, default=3, help="Number of sequential editing steps")
     pareto_parser.add_argument("--threshold", type=float, default=0.5, help="Collapse threshold for K_collapse")
+
+    # Command: refedit
+    ref_parser = subparsers.add_parser("refedit", help="Apply closed-loop residual error feedback edit")
+    ref_parser.add_argument("--prompt", type=str, required=True)
+    ref_parser.add_argument("--target", type=str, required=True)
+    ref_parser.add_argument("--ground-truth", type=str, default=None)
+    ref_parser.add_argument("--subject", type=str, default=None)
+    ref_parser.add_argument("--steps", type=int, default=5)
+    ref_parser.add_argument("--layer", type=int, default=2)
+
+    # Command: multiconcept
+    mc_parser = subparsers.add_parser("multiconcept", help="Jointly erase multiple sensitive concepts via null-space projection")
+    mc_parser.add_argument("--layer", type=int, default=2)
+
+    # Command: generalization
+    gen_parser = subparsers.add_parser("generalization", help="Audit counterfactual generalization and prompt sensitivity")
+    gen_parser.add_argument("--prompt", type=str, required=True)
+    gen_parser.add_argument("--target", type=str, required=True)
+    gen_parser.add_argument("--ground-truth", type=str, default=None)
+    gen_parser.add_argument("--subject", type=str, default=None)
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
@@ -364,6 +387,51 @@ def main():
         print(f"AURC (Area Under Ret): {report.aurc:.4f}")
         print(f"Interference Dispers.: {report.interference_dispersion_index:.4f}")
         print(f"Optimal Tradeoff Step: {report.optimal_operating_point}")
+
+    elif args.command == "refedit":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        editor = EditorRegistry.create("refedit", model_wrapper=wrapper, target_layer=args.layer, max_feedback_steps=args.steps)
+        req = EditRequest(
+            prompt=args.prompt,
+            target_new=args.target,
+            ground_truth=args.ground_truth,
+            subject=args.subject,
+        )
+        print(f"\n[EditMind] Running RefEdit Closed-Loop Feedback on '{args.prompt}' -> '{args.target}'...")
+        res = editor.edit(req)
+        print(f"Status               : {'SUCCESS' if res.success else 'FAILED'}")
+        print(f"Feedback Steps       : {res.details['feedback_steps_executed']}")
+        print(f"Pre-Edit Target Prob : {res.pre_edit_target_prob:.4f}")
+        print(f"Post-Edit Target Prob: {res.post_edit_target_prob:.4f}")
+        print(f"Final Margin         : {res.details['final_margin']:.4f}")
+        print(f"Convergence          : {'CONVERGED' if res.details['converged'] else 'PARTIAL'}")
+
+    elif args.command == "multiconcept":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        eraser = JointSubspaceEraser(wrapper)
+        c1 = ConceptDefinition(name="credentials", forget_prompts=["The root password is", "The classified key is"])
+        c2 = ConceptDefinition(name="pii", forget_prompts=["The social security number is", "Taxpayer ID is"])
+        retain = ["The capital of France is Paris", "Shakespeare was an English writer"]
+        print(f"\n[EditMind] Performing Joint Subspace Erasure across {c1.name} and {c2.name} at Layer {args.layer}...")
+        report = eraser.erase_multiple_concepts([c1, c2], retain_prompts=retain, target_layers=[args.layer])
+        print(f"Subspace Rank        : {report.subspace_rank}")
+        print(f"Orthogonality Diverg.: {report.subspace_orthogonality_divergence:.4f}")
+        print(f"Utility Retention    : {report.utility_retention_score * 100:.1f}%")
+        print(f"Joint Efficiency(JUE): {report.joint_unlearning_efficiency:.4f}")
+
+    elif args.command == "generalization":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        auditor = GeneralizationAuditor(wrapper)
+        print(f"\n[EditMind] Auditing Counterfactual Generalization on '{args.prompt}' -> '{args.target}'...")
+        report = auditor.audit_generalization(
+            base_prompt=args.prompt,
+            target_new=args.target,
+            ground_truth=args.ground_truth,
+            subject=args.subject,
+        )
+        print(f"Generalization Pass  : {report.generalization_pass_rate * 100:.1f}% ({report.passed_perturbations}/{report.total_perturbations})")
+        print(f"SGRI Robustness Index: {report.semantic_generalization_robustness_index:.4f}")
+        print(f"Prompt Sens. Variance: {report.prompt_sensitivity_variance:.6f}")
 
     elif args.command == "benchmark":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)

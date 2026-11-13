@@ -107,3 +107,40 @@ class ParetoApiRequest(BaseModel):
     sample_count: int = Field(3, json_schema_extra={"example": 3})
     collapse_threshold: float = Field(0.5, json_schema_extra={"example": 0.5})
     editor_method: str = Field("grace", json_schema_extra={"example": "grace"})
+
+
+class RefEditApiRequest(BaseModel):
+    prompt: str = Field(..., json_schema_extra={"example": "The Eiffel Tower is in"})
+    target_new: str = Field(..., json_schema_extra={"example": "Rome"})
+    ground_truth: Optional[str] = Field(None, json_schema_extra={"example": "Paris"})
+    subject: Optional[str] = Field(None, json_schema_extra={"example": "Eiffel Tower"})
+    max_feedback_steps: int = Field(5, json_schema_extra={"example": 5})
+    target_margin: float = Field(0.3, json_schema_extra={"example": 0.3})
+    target_layer: int = Field(2, json_schema_extra={"example": 2})
+
+
+class MultiConceptUnlearnRequest(BaseModel):
+    concepts: List[Dict[str, Any]] = Field(
+        ...,
+        json_schema_extra={
+            "example": [
+                {"name": "credentials", "forget_prompts": ["The root password is", "The classified key is"]},
+                {"name": "pii_ssn", "forget_prompts": ["The social security number is", "Taxpayer ID is"]},
+            ]
+        },
+    )
+    retain_prompts: List[str] = Field(
+        ...,
+        json_schema_extra={
+            "example": ["The capital of France is Paris", "Water boils at 100 degrees Celsius"]
+        },
+    )
+    target_layers: Optional[List[int]] = Field(None, json_schema_extra={"example": [2]})
+    max_subspace_rank: int = Field(4, json_schema_extra={"example": 4})
+
+
+class GeneralizationAuditRequest(BaseModel):
+    base_prompt: str = Field(..., json_schema_extra={"example": "The capital of France is"})
+    target_new: str = Field(..., json_schema_extra={"example": "Rome"})
+    ground_truth: Optional[str] = Field(None, json_schema_extra={"example": "Paris"})
+    subject: Optional[str] = Field(None, json_schema_extra={"example": "France"})
