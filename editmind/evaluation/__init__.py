@@ -29,6 +29,11 @@ from editmind.evaluation.generalization import (
     GeneralizationAuditReport,
     GeneralizationAuditor,
 )
+from editmind.evaluation.boundary import (
+    NeighborProbe,
+    BoundaryCalibrationReport,
+    KnowledgeBoundaryCalibrator,
+)
 
 __all__ = [
     "compute_efficacy_score",
@@ -52,4 +57,7 @@ __all__ = [
     "PerturbationProbe",
     "GeneralizationAuditReport",
     "GeneralizationAuditor",
+    "NeighborProbe",
+    "BoundaryCalibrationReport",
+    "KnowledgeBoundaryCalibrator",
 ]
