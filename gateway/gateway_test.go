@@ -592,3 +592,101 @@ func TestClientReputation(t *testing.T) {
 	}
 }
 
+func TestReadYourOwnWritesConsistency(t *testing.T) {
+	server := NewGatewayServer()
+
+	// 1. Register first edit
+	edit1 := KnowledgeEdit{
+		Subject: "Eiffel Tower",
+		Target:  "Rome",
+		Editor:  "rome",
+	}
+	b1, _ := json.Marshal(edit1)
+	w1 := httptest.NewRecorder()
+	server.HandleRegisterEdit(w1, httptest.NewRequest(http.MethodPost, "/api/gateway/edit", bytes.NewBuffer(b1)))
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("Expected 201 Created, got %d", w1.Code)
+	}
+	wm1 := w1.Header().Get("X-Session-Watermark")
+	if wm1 != "1" {
+		t.Fatalf("Expected X-Session-Watermark 1, got '%s'", wm1)
+	}
+
+	// 2. Register second edit
+	edit2 := KnowledgeEdit{
+		Subject: "Colosseum",
+		Target:  "Paris",
+		Editor:  "rome",
+	}
+	b2, _ := json.Marshal(edit2)
+	w2 := httptest.NewRecorder()
+	server.HandleRegisterEdit(w2, httptest.NewRequest(http.MethodPost, "/api/gateway/edit", bytes.NewBuffer(b2)))
+	wm2 := w2.Header().Get("X-Session-Watermark")
+	if wm2 != "2" {
+		t.Fatalf("Expected X-Session-Watermark 2, got '%s'", wm2)
+	}
+
+	if server.commitWatermark != 2 {
+		t.Fatalf("Expected commitWatermark 2, got %d", server.commitWatermark)
+	}
+}
+
+func TestReplicationStatusAndWait(t *testing.T) {
+	server := NewGatewayServer()
+
+	// 1. Inspect replication status initially
+	recStatus := httptest.NewRecorder()
+	server.HandleReplicationStatus(recStatus, httptest.NewRequest(http.MethodGet, "/api/gateway/replication/status", nil))
+	if recStatus.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on replication status, got %d", recStatus.Code)
+	}
+
+	var st struct {
+		NodeID          string `json:"node_id"`
+		CommitWatermark uint64 `json:"commit_watermark"`
+	}
+	json.NewDecoder(recStatus.Body).Decode(&st)
+	if st.CommitWatermark != 0 {
+		t.Fatalf("Expected initial watermark 0, got %d", st.CommitWatermark)
+	}
+
+	// 2. Asynchronously sync an edit from peer
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		syncPayload := map[string]interface{}{
+			"sender_id": "node-peer-1",
+			"edit": KnowledgeEdit{
+				Subject: "Big Ben",
+				Target:  "Madrid",
+				Editor:  "rome",
+			},
+		}
+		sBody, _ := json.Marshal(syncPayload)
+		server.HandleClusterSync(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/gateway/cluster/sync", bytes.NewBuffer(sBody)))
+	}()
+
+	// 3. Call replication wait for watermark 1
+	waitReq := map[string]interface{}{
+		"target_watermark": 1,
+		"timeout_ms":       300,
+	}
+	wBody, _ := json.Marshal(waitReq)
+	recWait := httptest.NewRecorder()
+	server.HandleReplicationWait(recWait, httptest.NewRequest(http.MethodPost, "/api/gateway/replication/wait", bytes.NewBuffer(wBody)))
+	if recWait.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on replication wait, got %d", recWait.Code)
+	}
+
+	var waitResp struct {
+		CaughtUp         bool   `json:"caught_up"`
+		CurrentWatermark uint64 `json:"current_watermark"`
+	}
+	json.NewDecoder(recWait.Body).Decode(&waitResp)
+	if !waitResp.CaughtUp {
+		t.Fatalf("Expected caught_up true, got false (current watermark: %d)", waitResp.CurrentWatermark)
+	}
+	if waitResp.CurrentWatermark < 1 {
+		t.Fatalf("Expected watermark >= 1, got %d", waitResp.CurrentWatermark)
+	}
+}
+

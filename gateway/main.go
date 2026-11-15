@@ -440,6 +440,11 @@ type GatewayServer struct {
 	bloom          *BloomFilter
 	peers          map[string]*ClusterPeer
 
+	// Causal consistency & replication watermarks
+	commitWatermark uint64
+	watermarkCond   *sync.Cond
+	peerWatermarks  map[string]uint64
+
 	// Metrics and latency counters
 	totalRequests         int64
 	interceptedCount      int64
@@ -469,8 +474,10 @@ func NewGatewayServer(walPath ...string) *GatewayServer {
 		walPath:        path,
 		bloom:          NewBloomFilter(16384, 4),
 		peers:          make(map[string]*ClusterPeer),
+		peerWatermarks: make(map[string]uint64),
 		latencies:      make([]float64, 0, 1000),
 	}
+	s.watermarkCond = sync.NewCond(&s.mu)
 	if path != "" {
 		_ = s.ReplayWAL()
 	}
@@ -565,6 +572,11 @@ func (s *GatewayServer) HandleRegisterEdit(w http.ResponseWriter, r *http.Reques
 	s.mu.Lock()
 	s.edits[key] = edit
 	s.auditLogs = append(s.auditLogs, edit)
+	s.commitWatermark++
+	currentWm := s.commitWatermark
+	if s.watermarkCond != nil {
+		s.watermarkCond.Broadcast()
+	}
 	s.mu.Unlock()
 
 	// Update bloom filter with subject and its words
@@ -576,6 +588,7 @@ func (s *GatewayServer) HandleRegisterEdit(w http.ResponseWriter, r *http.Reques
 	_ = s.AppendWAL(edit)
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Session-Watermark", fmt.Sprintf("%d", currentWm))
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "registered",
@@ -1282,6 +1295,14 @@ func (s *GatewayServer) HandleClusterSync(w http.ResponseWriter, r *http.Request
 	s.mu.Lock()
 	s.edits[key] = syncPayload.Edit
 	s.auditLogs = append(s.auditLogs, syncPayload.Edit)
+	s.commitWatermark++
+	currentWm := s.commitWatermark
+	if syncPayload.SenderID != "" {
+		s.peerWatermarks[syncPayload.SenderID] = currentWm
+	}
+	if s.watermarkCond != nil {
+		s.watermarkCond.Broadcast()
+	}
 	s.mu.Unlock()
 
 	s.bloom.Add(key)
@@ -1291,10 +1312,74 @@ func (s *GatewayServer) HandleClusterSync(w http.ResponseWriter, r *http.Request
 	_ = s.AppendWAL(syncPayload.Edit)
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Session-Watermark", fmt.Sprintf("%d", currentWm))
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":      "synchronized",
-		"subject":     syncPayload.Edit.Subject,
-		"total_edits": len(s.edits),
+		"status":           "synchronized",
+		"subject":          syncPayload.Edit.Subject,
+		"commit_watermark": currentWm,
+		"total_edits":      len(s.edits),
+	})
+}
+
+// HandleReplicationStatus reports local watermark, peer watermarks, and synchronization state.
+func (s *GatewayServer) HandleReplicationStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	peerWatermarksCopy := make(map[string]uint64, len(s.peerWatermarks))
+	for k, v := range s.peerWatermarks {
+		peerWatermarksCopy[k] = v
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":          s.nodeID,
+		"commit_watermark": s.commitWatermark,
+		"peer_watermarks":  peerWatermarksCopy,
+		"total_edits":      len(s.edits),
+		"active_peers":     len(s.peers),
+	})
+}
+
+// HandleReplicationWait waits until local watermark reaches the requested watermark or times out.
+func (s *GatewayServer) HandleReplicationWait(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		TargetWatermark uint64 `json:"target_watermark"`
+		TimeoutMs       int    `json:"timeout_ms"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.TimeoutMs <= 0 {
+		req.TimeoutMs = 100
+	}
+
+	start := time.Now()
+	deadline := time.Now().Add(time.Duration(req.TimeoutMs) * time.Millisecond)
+
+	s.mu.Lock()
+	for s.commitWatermark < req.TargetWatermark && time.Now().Before(deadline) {
+		if s.watermarkCond != nil {
+			s.watermarkCond.Wait()
+		} else {
+			break
+		}
+	}
+	currentWm := s.commitWatermark
+	s.mu.Unlock()
+
+	caughtUp := currentWm >= req.TargetWatermark
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"caught_up":         caughtUp,
+		"current_watermark": currentWm,
+		"target_watermark":  req.TargetWatermark,
+		"elapsed_ms":        float64(time.Since(start).Microseconds()) / 1000.0,
 	})
 }
 
@@ -1323,6 +1408,8 @@ func main() {
 	http.HandleFunc("/api/gateway/cluster/heartbeat", server.HandleClusterHeartbeat)
 	http.HandleFunc("/api/gateway/cluster/elect", server.HandleClusterElect)
 	http.HandleFunc("/api/gateway/cluster/state", server.HandleClusterState)
+	http.HandleFunc("/api/gateway/replication/status", server.HandleReplicationStatus)
+	http.HandleFunc("/api/gateway/replication/wait", server.HandleReplicationWait)
 
 	port := ":8080"
 	log.Printf("[EditMind] Enhanced Gateway microservice running on http://localhost%s (Node: %s)\n", port, server.nodeID)
