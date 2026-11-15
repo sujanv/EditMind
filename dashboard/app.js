@@ -980,4 +980,92 @@ document.addEventListener("DOMContentLoaded", () => {
       resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error calibrating knowledge boundary: ${err.message}</p>`;
     }
   });
+
+  // Compress Delta Button (INT8)
+  document.getElementById("btn-compress-int8").addEventListener("click", async () => {
+    const resultsContainer = document.getElementById("compression-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Quantizing parameter delta with symmetric INT8...</p>`;
+
+    try {
+      const res = await fetch("/api/delta/compress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "int8", rows: 64, cols: 128 })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🗜️ INT8 Delta Quantization Report</h4>
+          <p><strong>Original Size:</strong> ${data.original_bytes} bytes (FP32) &bull; <strong>Compressed Size:</strong> ${data.compressed_bytes} bytes (INT8)</p>
+          <p><strong>Compression Ratio:</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.compression_ratio}x</span> &bull; <strong>Memory Savings:</strong> ${(100 - (data.compressed_bytes / data.original_bytes * 100)).toFixed(1)}%</p>
+          <p><strong>Fidelity Cosine Sim:</strong> <span style="color:#89b4fa; font-weight:bold;">${data.fidelity_cosine_sim}</span> &bull; <strong>Relative L2 Error:</strong> ${data.relative_l2_error}</p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error compressing delta: ${err.message}</p>`;
+    }
+  });
+
+  // Compress Delta Button (Sparse Top-K)
+  document.getElementById("btn-compress-sparse").addEventListener("click", async () => {
+    const resultsContainer = document.getElementById("compression-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Applying Top-K magnitude sparse pruning (80% sparsity)...</p>`;
+
+    try {
+      const res = await fetch("/api/delta/compress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "sparse_topk", sparsity: 0.8, rows: 64, cols: 128 })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>✂️ Top-K Sparse Pruning Report</h4>
+          <p><strong>Original Size:</strong> ${data.original_bytes} bytes &bull; <strong>Sparse Representation:</strong> ${data.compressed_bytes} bytes</p>
+          <p><strong>Compression Ratio:</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.compression_ratio}x</span> &bull; <strong>Pruned Weights:</strong> 80% zeroed</p>
+          <p><strong>Fidelity Cosine Sim:</strong> <span style="color:#89b4fa; font-weight:bold;">${data.fidelity_cosine_sim}</span> &bull; <strong>Relative L2 Error:</strong> ${data.relative_l2_error}</p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error pruning delta: ${err.message}</p>`;
+    }
+  });
+
+  // Run Contrastive Steer Button
+  document.getElementById("btn-run-contrastive-steer").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const target = document.getElementById("target-input").value;
+    const resultsContainer = document.getElementById("compression-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Computing contrastive steering vector and evaluating alignment...</p>`;
+
+    try {
+      const res = await fetch("/api/steer/contrastive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          positive_prompt: `${prompt} ${target}`,
+          negative_prompt: `${prompt} inaccurate`,
+          probe_prompt: prompt,
+          desired_token_id: 2,
+          undesired_token_id: 1,
+          layer_idx: 2,
+          coefficient: 1.5
+        })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🧭 Contrastive Steering (DiffSteer) Evaluation</h4>
+          <p><strong>Target Layer:</strong> Layer ${data.target_layer} &bull; <strong>Steering Coefficient (&alpha;):</strong> ${data.coefficient}</p>
+          <p><strong>Vector Norm ||v||:</strong> ${data.vector_norm} &bull; <strong>Alignment Score:</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.concept_alignment_score.toFixed(4)}</span></p>
+          <p><strong>Suppression Ratio:</strong> ${(data.suppression_ratio * 100).toFixed(1)}% &bull; <strong>Drift KL Divergence:</strong> <span style="color:#89b4fa;">${data.neutral_drift_kl.toFixed(5)}</span></p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error evaluating contrastive steer: ${err.message}</p>`;
+    }
+  });
 });

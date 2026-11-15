@@ -113,6 +113,7 @@
           <button class="tab-btn" data-tab="tab-router">🌐 Router &amp; Pareto</button>
           <button class="tab-btn" data-tab="tab-closedloop">🔬 Closed-Loop &amp; Multi-Concept</button>
           <button class="tab-btn" data-tab="tab-hotpatch">🧩 Hot-Patch &amp; Boundary</button>
+          <button class="tab-btn" data-tab="tab-compression">🗜️ Compression &amp; Contrastive Steer</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -257,6 +258,20 @@
           </div>
 
           <div id="hotpatch-results" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Tab 13: Delta Compression & Contrastive Steering -->
+        <div class="tab-pane" id="tab-compression">
+          <h3>🗜️ Delta Compression &amp; Contrastive Steering</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Compress weight deltas (&Delta;W) via symmetric INT8/INT4 quantization or Top-K sparse magnitude pruning to reduce cache and replication payloads, and extract contrastive activation steering vectors from paired prompt distributions.</p>
+          
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+            <button type="button" id="btn-compress-int8" class="btn btn-primary">🗜️ Compress Delta (INT8)</button>
+            <button type="button" id="btn-compress-sparse" class="btn btn-secondary">✂️ Top-K Prune (80% Sparse)</button>
+            <button type="button" id="btn-run-contrastive-steer" class="btn btn-accent">🧭 Run Contrastive Steer</button>
+          </div>
+
+          <div id="compression-results" style="margin-top:12px;"></div>
         </div>
       </section>
     </main>
