@@ -460,9 +460,44 @@ editmind generalization --prompt "The capital of France is" --target "Paris"
 
 ---
 
+## 🧩 Dynamic Knowledge Hot-Patching Engine
+
+Modular runtime knowledge hot-patching engine that enables dynamic, low-rank parameter delta toggling and surgical unbaking:
+- **Rank-1 / Low-Rank SVD Factoring**: Parameter deltas $\Delta W$ are factored into $(U, V^T)$ projections with scaling coefficient $\alpha$, allowing zero-overhead activation-level patching.
+- **Dynamic Hot-Toggling**: Individual patches can be enabled, disabled, or dynamically scaled at runtime without modifying the base model weights.
+- **Zero-Drift Surgical Unbaking**: A permanent weight update can be cleanly unbaked by subtracting its factored delta from parameter weights without corrupting subsequent or preceding edits.
+- **Mutual Interference Matrix**: Real-time cross-patch cosine similarity evaluation ($\frac{\langle \Delta W_i, \Delta W_j \rangle}{\|\Delta W_i\| \|\Delta W_j\|}$) to prevent collinear parameter collision.
+
+```bash
+# Apply a modular low-rank hot patch
+editmind hotpatch apply --subject "Eiffel Tower" --prompt "The Eiffel Tower is in" --target "Rome" --layer 2
+
+# Inspect registered hot-patches
+editmind hotpatch list
+```
+
+---
+
+## 📐 Knowledge Boundary & Neighborhood Calibrator
+
+Quantifies semantic leakage of edited knowledge into neighboring entity domains:
+- **Automated Neighborhood Probing**: Identifies adjacent semantic entities and queries their ground-truth properties to detect unintended collateral probability shifts.
+- **Neighborhood Leakage Ratio (NLR)**: Proportion of neighboring entities experiencing target probability leakage exceeding tolerance ($\tau = 0.05$).
+- **Neighbor Preservation Score (NPS)**: Average retention of ground-truth probabilities for neighboring entities: $\text{NPS} = \frac{1}{|N|} \sum_{e \in N} \frac{P_{\text{post}}(y_e)}{P_{\text{pre}}(y_e)}$.
+- **Boundary Sharpness Index (BSI)**: Composite containment metric balancing target update efficacy against neighborhood bleed: $\text{BSI} = \text{Efficacy} \times (1 - \text{NLR}) \times \text{NPS}$.
+
+```bash
+# Calibrate and audit knowledge boundary containment
+editmind boundary-audit --prompt "The Eiffel Tower is in" --subject "Eiffel Tower" --target "Rome"
+```
+
+---
+
 ## ⚡ Go Microservice Gateway
 
 A high-performance Golang service located in [`gateway/`](gateway/):
+- **Read-Your-Own-Writes Consistency Watermarks**: Issues monotonic session watermarks (`X-Session-Watermark`) upon writes and guarantees client read-your-own-writes consistency across distributed replicas via causal watermark condition variables (`POST /api/gateway/watermark/query`, `POST /api/gateway/watermark/advance`).
+- **Replication Lag Tracking & Health Telemetry**: Monitors per-replica replication lag and commit indices in real time to prevent stale reads (`GET /api/gateway/replication/lag`).
 - **Sliding-Window Rate Limiting**: Fine-grained sliding-window counter tracking request timestamps across dynamic intervals with zero lock contention (`GET /api/gateway/sliding/stats`).
 - **Client Reputation & Adaptive Quarantine**: Automatic client score tracking ($0.0 - 100.0$). Penalizes abusive clients upon rate limit violations; automatically quarantines malicious clients with HTTP 403 Forbidden (`GET /api/gateway/clients/stats`, `POST /api/gateway/clients/reset`).
 - **Dual-Tier Priority Traffic Queuing**: Dedicated fast path separating `high` priority traffic (e.g., emergency privacy unlearning, SLA overrides) from `standard` traffic (`POST /api/gateway/priority/query`). High priority bypasses standard token-bucket throttling with microsecond dispatch.
@@ -505,6 +540,7 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 - **Reciprocal & Steer Panel**: Bidirectional Reversal Curse auditor and live ActAdd steering vector coefficient tuner.
 - **Router & Pareto Frontier Panel**: Semantic domain classification radar, paradigm dispatcher, and lifelong Plasticity-Stability Pareto frontier curves.
 - **Closed-Loop & Multi-Concept Panel**: RefEdit convergence trajectory viewer, Joint Subspace multi-concept erasure auditor, and counterfactual generalization stress-tester.
+- **Hot-Patch & Boundary Panel**: Modular low-rank patch lifecycle management, runtime low-rank scaling without weight re-baking, and Boundary Sharpness Index (BSI) neighborhood leakage containment.
 
 ---
 
@@ -512,10 +548,10 @@ Launch with `editmind serve --port 8000` and visit `http://localhost:8000`:
 
 Run the automated test suite across Python 3.10, 3.11, and 3.12:
 ```bash
-# Python Unit Tests (97 automated tests)
+# Python Unit Tests (103 automated tests)
 pytest tests/ -v
 
-# Go Gateway Tests (14 unit & benchmark suites)
+# Go Gateway Tests (16 unit & benchmark suites)
 cd gateway && go test -v ./...
 ```
 

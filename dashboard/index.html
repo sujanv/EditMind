@@ -112,6 +112,7 @@
           <button class="tab-btn" data-tab="tab-reciprocal">🔄 Reciprocal &amp; Steer</button>
           <button class="tab-btn" data-tab="tab-router">🌐 Router &amp; Pareto</button>
           <button class="tab-btn" data-tab="tab-closedloop">🔬 Closed-Loop &amp; Multi-Concept</button>
+          <button class="tab-btn" data-tab="tab-hotpatch">🧩 Hot-Patch &amp; Boundary</button>
         </div>
 
         <!-- Tab 1: Causal Trace -->
@@ -242,6 +243,20 @@
           </div>
 
           <div id="closedloop-results" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Tab 12: Hot-Patch Engine & Boundary Calibrator -->
+        <div class="tab-pane" id="tab-hotpatch">
+          <h3>🧩 Hot-Patch Engine &amp; Knowledge Boundary Calibrator</h3>
+          <p style="font-size:13px; color:#a6adc8; margin:8px 0 16px 0;">Manage modular low-rank knowledge patches with runtime hot-enabling/disabling without weight re-baking, inspect patch mutual interference matrices, and audit knowledge boundary sharpness (BSI) against adjacent neighbor entities.</p>
+          
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+            <button type="button" id="btn-apply-hotpatch" class="btn btn-primary">➕ Register Hot-Patch</button>
+            <button type="button" id="btn-list-hotpatches" class="btn btn-secondary">📋 Inspect Active Patches</button>
+            <button type="button" id="btn-run-boundary" class="btn btn-accent">📐 Calibrate Knowledge Boundary</button>
+          </div>
+
+          <div id="hotpatch-results" style="margin-top:12px;"></div>
         </div>
       </section>
     </main>

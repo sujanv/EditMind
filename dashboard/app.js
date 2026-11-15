@@ -840,4 +840,144 @@ document.addEventListener("DOMContentLoaded", () => {
       resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error auditing generalization: ${err.message}</p>`;
     }
   });
+
+  // Apply Hot-Patch Button
+  document.getElementById("btn-apply-hotpatch").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const target = document.getElementById("target-input").value;
+    const subject = document.getElementById("subject-input").value;
+    const resultsContainer = document.getElementById("hotpatch-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Registering modular low-rank hot-patch in memory...</p>`;
+
+    try {
+      const res = await fetch("/api/patch/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject,
+          prompt,
+          target_new: target,
+          layer_idx: 2,
+          patch_id: "patch_" + Math.random().toString(36).substring(2, 8)
+        })
+      });
+      const data = await res.json();
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>🧩 Hot-Patch Successfully Registered</h4>
+          <p><strong>Patch ID:</strong> <code>${data.patch_id}</code> &bull; <strong>Status:</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.enabled ? 'ACTIVE' : 'DISABLED'}</span></p>
+          <p><strong>Subject:</strong> "${data.subject}" &rarr; <strong>Target:</strong> "${data.target_new}"</p>
+          <p><strong>Parameter Hook:</strong> Layer ${data.layer_idx} <code>${data.target_param}</code> &bull; <strong>Delta Norm:</strong> ${data.delta_norm.toFixed(4)}</p>
+          <p style="font-size:12px; color:#a6adc8; margin-top:8px;">Patch is hot-applied to model activations. Can be toggled or scaled dynamically without re-baking.</p>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error applying hot-patch: ${err.message}</p>`;
+    }
+  });
+
+  // Inspect Active Patches Button
+  document.getElementById("btn-list-hotpatches").addEventListener("click", async () => {
+    const resultsContainer = document.getElementById("hotpatch-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Fetching registered knowledge patches...</p>`;
+
+    try {
+      const res = await fetch("/api/patch/list");
+      const data = await res.json();
+
+      if (data.total_patches === 0) {
+        resultsContainer.innerHTML = `<p class="placeholder-text">No hot-patches registered yet. Click "➕ Register Hot-Patch" to create one.</p>`;
+        return;
+      }
+
+      let patchRows = data.patches.map(p => `
+        <tr>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;"><code>${p.patch_id}</code></td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.subject} &rarr; ${p.target_new}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">Layer ${p.layer_idx}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.enabled ? '<span style="color:#a6e3a1; font-weight:bold;">ENABLED</span>' : '<span style="color:#f38ba8;">DISABLED</span>'}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.delta_norm.toFixed(4)}</td>
+        </tr>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>📋 Registered Knowledge Hot-Patches</h4>
+          <p><strong>Total Patches:</strong> ${data.total_patches} &bull; <strong>Active:</strong> <span style="color:#a6e3a1; font-weight:bold;">${data.active_patches}</span> &bull; <strong>Inactive:</strong> ${data.inactive_patches}</p>
+          <table style="width:100%; font-size:12px; border-collapse:collapse; margin-top:10px; text-align:left;">
+            <thead>
+              <tr style="color:#a6adc8; border-bottom:1px solid #45475a;">
+                <th style="padding:4px 8px;">Patch ID</th>
+                <th style="padding:4px 8px;">Subject &rarr; Target</th>
+                <th style="padding:4px 8px;">Layer</th>
+                <th style="padding:4px 8px;">State</th>
+                <th style="padding:4px 8px;">||&Delta;W||</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${patchRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error listing hot-patches: ${err.message}</p>`;
+    }
+  });
+
+  // Calibrate Knowledge Boundary Button
+  document.getElementById("btn-run-boundary").addEventListener("click", async () => {
+    const prompt = document.getElementById("edit-prompt").value;
+    const target = document.getElementById("target-input").value;
+    const subject = document.getElementById("subject-input").value;
+    const resultsContainer = document.getElementById("hotpatch-results");
+    resultsContainer.innerHTML = `<p style="color:#89b4fa;">Probing adjacent semantic neighborhood for boundary leakage...</p>`;
+
+    try {
+      const res = await fetch("/api/boundary-audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, subject, target_new: target })
+      });
+      const data = await res.json();
+
+      let probeRows = data.probes.map(p => `
+        <tr>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.neighbor_entity}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;"><code style="font-size:11px;">"${p.prompt}"</code></td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.expected_target}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.expected_target_prob.toFixed(4)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244; color:${p.target_new_prob > 0.1 ? '#f38ba8' : '#a6adc8'};">${p.target_new_prob.toFixed(4)}</td>
+          <td style="padding:4px 8px; border-bottom:1px solid #313244;">${p.leakage_detected ? '⚠️ Leak' : '✅ Clear'}</td>
+        </tr>
+      `).join("");
+
+      resultsContainer.innerHTML = `
+        <div class="prob-card">
+          <h4>📐 Knowledge Boundary Calibration Report</h4>
+          <p><strong>Subject:</strong> "${data.subject}" &bull; <strong>Target Efficacy:</strong> ${(data.target_efficacy * 100).toFixed(1)}%</p>
+          <p><strong>Boundary Sharpness Index (BSI):</strong> <span style="color:#89b4fa; font-weight:bold;">${data.boundary_sharpness_index.toFixed(4)}</span> &bull; <strong>Leakage Ratio (NLR):</strong> ${(data.neighborhood_leakage_ratio * 100).toFixed(1)}%</p>
+          <p><strong>Neighbor Fact Retention:</strong> ${(data.neighbor_preservation_score * 100).toFixed(1)}% &bull; <strong>Verdict:</strong> ${data.is_well_calibrated ? '✅ <span style="color:#a6e3a1; font-weight:bold;">Sharply Contained</span>' : '⚠️ <span style="color:#f38ba8; font-weight:bold;">Neighborhood Leakage Detected</span>'}</p>
+          <table style="width:100%; font-size:12px; border-collapse:collapse; margin-top:10px; text-align:left;">
+            <thead>
+              <tr style="color:#a6adc8; border-bottom:1px solid #45475a;">
+                <th style="padding:4px 8px;">Neighbor</th>
+                <th style="padding:4px 8px;">Probe Prompt</th>
+                <th style="padding:4px 8px;">Expected</th>
+                <th style="padding:4px 8px;">P(True)</th>
+                <th style="padding:4px 8px;">P(Bleed)</th>
+                <th style="padding:4px 8px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${probeRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      resultsContainer.innerHTML = `<p style="color:#f38ba8;">Error calibrating knowledge boundary: ${err.message}</p>`;
+    }
+  });
 });
