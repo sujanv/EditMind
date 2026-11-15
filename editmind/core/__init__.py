@@ -9,6 +9,7 @@ from editmind.core.base_editor import BaseKnowledgeEditor
 from editmind.core.registry import EditorRegistry, register_editor
 from editmind.core.config import EditMindConfig, load_config
 from editmind.core.checkpoint import EditPatch, CheckpointManager
+from editmind.core.hot_patch import HotPatch, HotPatchEngine
 
 __all__ = [
     "EditRequest",
@@ -23,4 +24,6 @@ __all__ = [
     "load_config",
     "EditPatch",
     "CheckpointManager",
+    "HotPatch",
+    "HotPatchEngine",
 ]
