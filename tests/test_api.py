@@ -323,5 +323,49 @@ def test_generalization_endpoint():
     assert len(data["probes"]) > 0
 
 
+def test_patch_apply_and_toggle_endpoint():
+    # 1. Apply hot-patch
+    res = client.post("/api/patch/apply", json={
+        "subject": "Eiffel Tower",
+        "prompt": "The Eiffel Tower is located in",
+        "target_new": "Rome",
+        "layer_idx": 2,
+        "patch_id": "test_api_patch",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["patch_id"] == "test_api_patch"
+    assert data["enabled"] is True
+
+    # 2. Toggle hot-patch off
+    res_toggle = client.post("/api/patch/toggle", json={
+        "patch_id": "test_api_patch",
+        "enabled": False,
+    })
+    assert res_toggle.status_code == 200
+    assert res_toggle.json()["enabled"] is False
+
+    # 3. List hot-patches
+    res_list = client.get("/api/patch/list")
+    assert res_list.status_code == 200
+    summary = res_list.json()
+    assert summary["total_patches"] >= 1
+
+
+def test_boundary_audit_endpoint():
+    res = client.post("/api/boundary-audit", json={
+        "prompt": "The Eiffel Tower is located in",
+        "subject": "Eiffel Tower",
+        "target_new": "Rome",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["subject"] == "Eiffel Tower"
+    assert "boundary_sharpness_index" in data
+    assert "neighborhood_leakage_ratio" in data
+    assert len(data["probes"]) == 3
+
+
+
 
 

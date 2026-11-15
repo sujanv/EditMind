@@ -27,6 +27,8 @@ from editmind.models.localization import ConsensusLayerRanker
 from editmind.safety.unlearning import ConceptEraser
 from editmind.safety.multiconcept import JointSubspaceEraser, ConceptDefinition
 from editmind.evaluation.generalization import GeneralizationAuditor
+from editmind.evaluation.boundary import KnowledgeBoundaryCalibrator
+from editmind.core.hot_patch import HotPatchEngine, HotPatch
 from editmind.editors.refedit import ResidualErrorFeedbackEditor
 from editmind.routing import KnowledgeDomainRouter
 from editmind.continual import ParetoPlasticityAuditor
@@ -146,6 +148,19 @@ def main():
     gen_parser.add_argument("--target", type=str, required=True)
     gen_parser.add_argument("--ground-truth", type=str, default=None)
     gen_parser.add_argument("--subject", type=str, default=None)
+
+    # Command: patch
+    patch_parser = subparsers.add_parser("patch", help="Manage modular low-rank knowledge hot-patches")
+    patch_parser.add_argument("--prompt", type=str, default="The Eiffel Tower is located in")
+    patch_parser.add_argument("--subject", type=str, default="Eiffel Tower")
+    patch_parser.add_argument("--target", type=str, default="Rome")
+    patch_parser.add_argument("--layer", type=int, default=2)
+
+    # Command: boundary
+    bound_parser = subparsers.add_parser("boundary", help="Audit knowledge boundary sharpness and neighborhood leakage")
+    bound_parser.add_argument("--prompt", type=str, required=True)
+    bound_parser.add_argument("--subject", type=str, required=True)
+    bound_parser.add_argument("--target", type=str, required=True)
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
@@ -432,6 +447,40 @@ def main():
         print(f"Generalization Pass  : {report.generalization_pass_rate * 100:.1f}% ({report.passed_perturbations}/{report.total_perturbations})")
         print(f"SGRI Robustness Index: {report.semantic_generalization_robustness_index:.4f}")
         print(f"Prompt Sens. Variance: {report.prompt_sensitivity_variance:.6f}")
+
+    elif args.command == "patch":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        engine = HotPatchEngine(wrapper)
+        shape = wrapper.get_layer(args.layer).mlp.down_proj.weight.shape
+        delta = torch.randn(shape) * 0.05
+        patch = engine.register_patch(
+            subject=args.subject,
+            prompt=args.prompt,
+            target_new=args.target,
+            layer_idx=args.layer,
+            delta_tensor=delta,
+            patch_id="patch_cli",
+        )
+        print(f"\n[EditMind Hot-Patch Engine]")
+        print(f"Patch ID             : {patch.patch_id}")
+        print(f"Target Subject       : {patch.subject}")
+        print(f"Target Param         : Layer {patch.layer_idx} {patch.target_param}")
+        print(f"Status               : {'ENABLED' if patch.enabled else 'DISABLED'}")
+        print(f"Delta Norm           : {patch.to_dict()['delta_norm']:.4f}")
+
+    elif args.command == "boundary":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        calibrator = KnowledgeBoundaryCalibrator(wrapper)
+        print(f"\n[EditMind] Calibrating Knowledge Boundary for '{args.subject}' -> '{args.target}'...")
+        report = calibrator.calibrate_boundary(
+            prompt=args.prompt,
+            subject=args.subject,
+            target_new=args.target,
+        )
+        print(f"Boundary Sharpness   : {report.boundary_sharpness_index:.4f}")
+        print(f"Neighborhood Leakage : {report.neighborhood_leakage_ratio * 100:.1f}%")
+        print(f"Neighbor Retention   : {report.neighbor_preservation_score * 100:.1f}%")
+        print(f"Calibration Verdict  : {'✅ SHARP & CONTAINED' if report.is_well_calibrated else '⚠️ BOUNDARY LEAKAGE DETECTED'}")
 
     elif args.command == "benchmark":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)

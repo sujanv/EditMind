@@ -144,3 +144,25 @@ class GeneralizationAuditRequest(BaseModel):
     target_new: str = Field(..., json_schema_extra={"example": "Rome"})
     ground_truth: Optional[str] = Field(None, json_schema_extra={"example": "Paris"})
     subject: Optional[str] = Field(None, json_schema_extra={"example": "France"})
+
+
+class PatchApiRequest(BaseModel):
+    subject: str = Field(..., json_schema_extra={"example": "Eiffel Tower"})
+    prompt: str = Field(..., json_schema_extra={"example": "The Eiffel Tower is located in"})
+    target_new: str = Field(..., json_schema_extra={"example": "Rome"})
+    layer_idx: int = Field(2, json_schema_extra={"example": 2})
+    target_param: str = Field("mlp.down_proj.weight", json_schema_extra={"example": "mlp.down_proj.weight"})
+    scaling: float = Field(1.0, json_schema_extra={"example": 1.0})
+    patch_id: Optional[str] = Field(None, json_schema_extra={"example": "patch_1"})
+
+
+class PatchToggleRequest(BaseModel):
+    patch_id: str = Field(..., json_schema_extra={"example": "patch_1"})
+    enabled: bool = Field(..., json_schema_extra={"example": False})
+
+
+class BoundaryAuditRequest(BaseModel):
+    prompt: str = Field(..., json_schema_extra={"example": "The Eiffel Tower is located in"})
+    subject: str = Field(..., json_schema_extra={"example": "Eiffel Tower"})
+    target_new: str = Field(..., json_schema_extra={"example": "Rome"})
+    neighbors: Optional[List[Dict[str, str]]] = Field(None)

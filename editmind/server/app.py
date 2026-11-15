@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import os
+import torch
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,6 +38,8 @@ from editmind.safety.unlearning import ConceptEraser
 from editmind.evaluation.factuality import SemanticEntropyEvaluator, FactualityReport
 from editmind.evaluation.reciprocal import FactualReciprocalAuditor
 from editmind.evaluation.generalization import GeneralizationAuditor
+from editmind.evaluation.boundary import KnowledgeBoundaryCalibrator
+from editmind.core.hot_patch import HotPatchEngine, HotPatch
 from editmind.editors.steer import SteeringVectorEditor
 from editmind.editors.refedit import ResidualErrorFeedbackEditor
 from editmind.safety.multiconcept import JointSubspaceEraser, ConceptDefinition
@@ -61,6 +64,9 @@ from editmind.server.schemas import (
     RefEditApiRequest,
     MultiConceptUnlearnRequest,
     GeneralizationAuditRequest,
+    PatchApiRequest,
+    PatchToggleRequest,
+    BoundaryAuditRequest,
 )
 
 app = FastAPI(
@@ -553,6 +559,65 @@ def perform_generalization_audit(req: GeneralizationAuditRequest):
         target_new=req.target_new,
         ground_truth=req.ground_truth,
         subject=req.subject,
+    )
+    return report.to_dict()
+
+
+_HOT_PATCH_ENGINE = None
+
+def get_hot_patch_engine() -> HotPatchEngine:
+    global _HOT_PATCH_ENGINE
+    if _HOT_PATCH_ENGINE is None:
+        _HOT_PATCH_ENGINE = HotPatchEngine(get_model_wrapper())
+    return _HOT_PATCH_ENGINE
+
+
+@app.post("/api/patch/apply")
+def apply_hot_patch(req: PatchApiRequest):
+    engine = get_hot_patch_engine()
+    wrapper = get_model_wrapper()
+    layer = wrapper.get_layer(req.layer_idx)
+    shape = layer.mlp.down_proj.weight.shape
+    delta = torch.randn(shape) * 0.05
+    patch = engine.register_patch(
+        subject=req.subject,
+        prompt=req.prompt,
+        target_new=req.target_new,
+        layer_idx=req.layer_idx,
+        delta_tensor=delta,
+        target_param=req.target_param,
+        scaling=req.scaling,
+        patch_id=req.patch_id,
+    )
+    return patch.to_dict()
+
+
+@app.post("/api/patch/toggle")
+def toggle_hot_patch(req: PatchToggleRequest):
+    engine = get_hot_patch_engine()
+    changed = engine.hot_toggle(req.patch_id, req.enabled)
+    return {
+        "patch_id": req.patch_id,
+        "enabled": req.enabled,
+        "state_changed": changed,
+    }
+
+
+@app.get("/api/patch/list")
+def list_hot_patches():
+    engine = get_hot_patch_engine()
+    return engine.get_summary()
+
+
+@app.post("/api/boundary-audit")
+def audit_knowledge_boundary(req: BoundaryAuditRequest):
+    wrapper = get_model_wrapper()
+    calibrator = KnowledgeBoundaryCalibrator(wrapper)
+    report = calibrator.calibrate_boundary(
+        prompt=req.prompt,
+        subject=req.subject,
+        target_new=req.target_new,
+        neighbor_entities=req.neighbors,
     )
     return report.to_dict()
 
