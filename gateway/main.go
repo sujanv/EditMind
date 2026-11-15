@@ -445,6 +445,9 @@ type GatewayServer struct {
 	watermarkCond   *sync.Cond
 	peerWatermarks  map[string]uint64
 
+	// Distributed Mesh Quota Rebalancer
+	meshRebalancer *DistributedMeshRebalancer
+
 	// Metrics and latency counters
 	totalRequests         int64
 	interceptedCount      int64
@@ -475,6 +478,7 @@ func NewGatewayServer(walPath ...string) *GatewayServer {
 		bloom:          NewBloomFilter(16384, 4),
 		peers:          make(map[string]*ClusterPeer),
 		peerWatermarks: make(map[string]uint64),
+		meshRebalancer: NewDistributedMeshRebalancer("local-node", 5*time.Minute),
 		latencies:      make([]float64, 0, 1000),
 	}
 	s.watermarkCond = sync.NewCond(&s.mu)
@@ -1410,6 +1414,9 @@ func main() {
 	http.HandleFunc("/api/gateway/cluster/state", server.HandleClusterState)
 	http.HandleFunc("/api/gateway/replication/status", server.HandleReplicationStatus)
 	http.HandleFunc("/api/gateway/replication/wait", server.HandleReplicationWait)
+	http.HandleFunc("/api/gateway/mesh/lease", server.handleMeshLease)
+	http.HandleFunc("/api/gateway/mesh/return", server.handleMeshReturn)
+	http.HandleFunc("/api/gateway/mesh/telemetry", server.handleMeshTelemetry)
 
 	port := ":8080"
 	log.Printf("[EditMind] Enhanced Gateway microservice running on http://localhost%s (Node: %s)\n", port, server.nodeID)
