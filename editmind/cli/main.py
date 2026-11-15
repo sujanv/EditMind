@@ -29,6 +29,8 @@ from editmind.safety.multiconcept import JointSubspaceEraser, ConceptDefinition
 from editmind.evaluation.generalization import GeneralizationAuditor
 from editmind.evaluation.boundary import KnowledgeBoundaryCalibrator
 from editmind.core.hot_patch import HotPatchEngine, HotPatch
+from editmind.core.compression import DeltaCompressor, CompressionMethod
+from editmind.safety.contrastive_steer import ContrastiveSteeringEngine, ContrastivePromptPair
 from editmind.editors.refedit import ResidualErrorFeedbackEditor
 from editmind.routing import KnowledgeDomainRouter
 from editmind.continual import ParetoPlasticityAuditor
@@ -161,6 +163,19 @@ def main():
     bound_parser.add_argument("--prompt", type=str, required=True)
     bound_parser.add_argument("--subject", type=str, required=True)
     bound_parser.add_argument("--target", type=str, required=True)
+
+    # Command: compress-delta
+    compress_parser = subparsers.add_parser("compress-delta", help="Compress weight edit delta with quantization or pruning")
+    compress_parser.add_argument("--method", type=str, default="int8", choices=["int8", "int4", "sparse_topk", "hybrid"])
+    compress_parser.add_argument("--sparsity", type=float, default=0.8)
+
+    # Command: contrastive-steer
+    csteer_parser = subparsers.add_parser("contrastive-steer", help="Extract and apply contrastive steering vectors")
+    csteer_parser.add_argument("--pos", type=str, default="The capital of France is Rome")
+    csteer_parser.add_argument("--neg", type=str, default="The capital of France is Paris")
+    csteer_parser.add_argument("--probe", type=str, default="The capital of France is")
+    csteer_parser.add_argument("--layer", type=int, default=2)
+    csteer_parser.add_argument("--coeff", type=float, default=1.5)
 
     # Command: benchmark
     bench_parser = subparsers.add_parser("benchmark", help="Run benchmark evaluation across multiple methods")
@@ -481,6 +496,40 @@ def main():
         print(f"Neighborhood Leakage : {report.neighborhood_leakage_ratio * 100:.1f}%")
         print(f"Neighbor Retention   : {report.neighbor_preservation_score * 100:.1f}%")
         print(f"Calibration Verdict  : {'✅ SHARP & CONTAINED' if report.is_well_calibrated else '⚠️ BOUNDARY LEAKAGE DETECTED'}")
+
+    elif args.command == "compress-delta":
+        import torch
+        delta = torch.randn(64, 128) * 0.05
+        delta[2, 3] = 1.8
+        delta[5, 5] = -2.2
+        comp = DeltaCompressor.compress(delta, method=CompressionMethod(args.method), sparsity=args.sparsity)
+        print(f"\n[EditMind Delta Compressor]")
+        print(f"Compression Method   : {comp.method.upper()}")
+        print(f"Original Footprint   : {comp.original_bytes} bytes")
+        print(f"Compressed Footprint : {comp.compressed_bytes} bytes")
+        print(f"Compression Ratio    : {comp.compression_ratio:.2f}x")
+        print(f"Reconstruction CosSim: {comp.fidelity_cosine_sim:.5f}")
+        print(f"Relative L2 Error    : {comp.relative_l2_error:.5f}")
+
+    elif args.command == "contrastive-steer":
+        wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)
+        engine = ContrastiveSteeringEngine(wrapper.model, wrapper.tokenizer)
+        pairs = [ContrastivePromptPair(positive_prompt=args.pos, negative_prompt=args.neg)]
+        print(f"\n[EditMind] Computing Contrastive Steering Vector for Layer {args.layer}...")
+        engine.compute_steering_vector(pairs, layer_indices=[args.layer])
+        res = engine.evaluate_steering(
+            probe_prompt=args.probe,
+            desired_token_id=2,
+            undesired_token_id=1,
+            layer_idx=args.layer,
+            coefficient=args.coeff,
+        )
+        print(f"Target Layer         : {res.target_layer}")
+        print(f"Steering Coeff (α)   : {res.coefficient}")
+        print(f"Vector Norm ||v||    : {res.vector_norm:.4f}")
+        print(f"Alignment Score      : {res.concept_alignment_score:.4f}")
+        print(f"Suppression Ratio    : {res.suppression_ratio * 100:.1f}%")
+        print(f"Drift KL Divergence  : {res.neutral_drift_kl:.5f}")
 
     elif args.command == "benchmark":
         wrapper = UnifiedModelWrapper.create_toy_model(hidden_dim=128, num_layers=6)

@@ -166,3 +166,20 @@ class BoundaryAuditRequest(BaseModel):
     subject: str = Field(..., json_schema_extra={"example": "Eiffel Tower"})
     target_new: str = Field(..., json_schema_extra={"example": "Rome"})
     neighbors: Optional[List[Dict[str, str]]] = Field(None)
+
+
+class DeltaCompressApiRequest(BaseModel):
+    method: str = Field("int8", json_schema_extra={"example": "int8"})
+    sparsity: float = Field(0.8, json_schema_extra={"example": 0.8})
+    rows: int = Field(64, json_schema_extra={"example": 64})
+    cols: int = Field(128, json_schema_extra={"example": 128})
+
+
+class ContrastiveSteerApiRequest(BaseModel):
+    positive_prompt: str = Field(..., json_schema_extra={"example": "The capital of France is Rome"})
+    negative_prompt: str = Field(..., json_schema_extra={"example": "The capital of France is Paris"})
+    probe_prompt: str = Field(..., json_schema_extra={"example": "The capital of France is"})
+    desired_token_id: int = Field(2, json_schema_extra={"example": 2})
+    undesired_token_id: int = Field(1, json_schema_extra={"example": 1})
+    layer_idx: int = Field(2, json_schema_extra={"example": 2})
+    coefficient: float = Field(1.5, json_schema_extra={"example": 1.5})

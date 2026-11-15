@@ -40,6 +40,8 @@ from editmind.evaluation.reciprocal import FactualReciprocalAuditor
 from editmind.evaluation.generalization import GeneralizationAuditor
 from editmind.evaluation.boundary import KnowledgeBoundaryCalibrator
 from editmind.core.hot_patch import HotPatchEngine, HotPatch
+from editmind.core.compression import DeltaCompressor, CompressionMethod
+from editmind.safety.contrastive_steer import ContrastiveSteeringEngine, ContrastivePromptPair
 from editmind.editors.steer import SteeringVectorEditor
 from editmind.editors.refedit import ResidualErrorFeedbackEditor
 from editmind.safety.multiconcept import JointSubspaceEraser, ConceptDefinition
@@ -67,6 +69,8 @@ from editmind.server.schemas import (
     PatchApiRequest,
     PatchToggleRequest,
     BoundaryAuditRequest,
+    DeltaCompressApiRequest,
+    ContrastiveSteerApiRequest,
 )
 
 app = FastAPI(
@@ -620,6 +624,39 @@ def audit_knowledge_boundary(req: BoundaryAuditRequest):
         neighbor_entities=req.neighbors,
     )
     return report.to_dict()
+
+
+@app.post("/api/delta/compress")
+def compress_parameter_delta(req: DeltaCompressApiRequest):
+    delta = torch.randn(req.rows, req.cols) * 0.05
+    # add synthetic salient updates
+    delta[2, 3] = 1.8
+    delta[5, 5] = -2.2
+
+    method_enum = CompressionMethod(req.method.lower())
+    comp = DeltaCompressor.compress(delta, method=method_enum, sparsity=req.sparsity)
+    return comp.to_dict()
+
+
+@app.post("/api/steer/contrastive")
+def run_contrastive_steer(req: ContrastiveSteerApiRequest):
+    wrapper = get_model_wrapper()
+    engine = ContrastiveSteeringEngine(wrapper.model, wrapper.tokenizer)
+    pairs = [
+        ContrastivePromptPair(
+            positive_prompt=req.positive_prompt,
+            negative_prompt=req.negative_prompt,
+        )
+    ]
+    engine.compute_steering_vector(pairs, layer_indices=[req.layer_idx])
+    result = engine.evaluate_steering(
+        probe_prompt=req.probe_prompt,
+        desired_token_id=req.desired_token_id,
+        undesired_token_id=req.undesired_token_id,
+        layer_idx=req.layer_idx,
+        coefficient=req.coefficient,
+    )
+    return result.to_dict()
 
 
 dashboard_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "dashboard")
